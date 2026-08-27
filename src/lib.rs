@@ -4,6 +4,7 @@
 mod identity;
 mod model;
 mod profile;
+mod replay;
 mod session;
 
 #[cfg(target_os = "linux")]
@@ -21,4 +22,5 @@ pub use profile::{
     DeviceProfileAssignment, ProfileCandidate, ProfileEvidence, ProfileId, ProfileMatch,
     ProfileSelection, ProfileSelectionMode,
 };
+pub use replay::{FixtureManifest, FixtureSource, ReplayProvider, ReplaySourcePlan};
 pub use session::{CaptureProvider, CaptureSession, EventSource};
