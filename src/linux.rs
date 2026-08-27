@@ -105,6 +105,13 @@ impl EventSource for EvdevSource {
         };
         let mut batches = Vec::new();
         for event in events {
+            if is_synchronization_lost(event.event_type().0, event.code()) {
+                self.pending.clear();
+                return Err(CaptureError::new(
+                    CaptureErrorKind::SynchronizationLost,
+                    format!("{}: kernel event buffer overrun", self.source_id),
+                ));
+            }
             let is_report = event.event_type() == EventType::SYNCHRONIZATION && event.code() == 0;
             if !is_report {
                 self.pending.push(NativeEvent {
@@ -127,6 +134,10 @@ impl EventSource for EvdevSource {
         }
         Ok(batches)
     }
+}
+
+fn is_synchronization_lost(event_type: u16, code: u16) -> bool {
+    event_type == EventType::SYNCHRONIZATION.0 && code == 3
 }
 
 fn describe(path: &Path, device: &Device) -> Result<Option<DeviceDescriptor>, CaptureError> {
@@ -315,5 +326,12 @@ mod tests {
             classify(Some([0x130].into_iter()), Some([].into_iter())),
             None
         );
+    }
+
+    #[test]
+    fn synchronization_loss_is_recognized_without_emitting_a_partial_frame() {
+        assert!(is_synchronization_lost(EventType::SYNCHRONIZATION.0, 3));
+        assert!(!is_synchronization_lost(EventType::SYNCHRONIZATION.0, 0));
+        assert!(!is_synchronization_lost(3, 3));
     }
 }

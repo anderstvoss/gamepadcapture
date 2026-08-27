@@ -13,6 +13,7 @@ The public model deliberately preserves:
 - every native key, axis, switch, LED, and force-feedback code;
 - absolute-axis minimum, maximum, current, fuzz, flat, and resolution values;
 - kernel synchronization-frame boundaries and native event values;
+- explicit `SYN_DROPPED` loss reporting; incomplete frames are discarded;
 - separate physical-device and event-source identities for compound devices;
 - identity stability (`Hardware`, `Topology`, or `ConnectionOnly`) so anonymous
   devices are never mistaken for safe persisted assignments;
