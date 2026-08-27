@@ -2,13 +2,26 @@
 
 use std::collections::BTreeMap;
 
-use crate::{CaptureEvent, DeviceDescriptor, SourceId};
+use crate::{
+    AutoProfileDetector, CaptureAccess, CaptureEvent, DeviceDescriptor, EventBatch, ProfileId,
+    ProfileSelectionMode, SourceId,
+};
+
+/// The current state of one connected source, including the access result and
+/// inspectable automatic profile evidence.
+#[derive(Debug, Clone)]
+pub struct TesterSource {
+    pub device: DeviceDescriptor,
+    pub access: CaptureAccess,
+    pub profile: ProfileSelectionMode,
+}
 
 /// Native values and lifecycle state rendered by the tester.
 #[derive(Debug, Default)]
 pub struct TesterState {
-    sources: BTreeMap<SourceId, DeviceDescriptor>,
+    sources: BTreeMap<SourceId, TesterSource>,
     values: BTreeMap<(SourceId, u16, u16), i32>,
+    frames: Vec<EventBatch>,
     log: Vec<String>,
 }
 
@@ -19,10 +32,19 @@ impl TesterState {
             CaptureEvent::Connected { device, access } => {
                 self.log
                     .push(format!("connected {} ({access:?})", device.source_id));
-                self.sources.insert(device.source_id.clone(), device);
+                let profile = AutoProfileDetector::new(Vec::new(), ProfileId::new("sdl-joystick"))
+                    .detect(&device);
+                self.sources.insert(
+                    device.source_id.clone(),
+                    TesterSource {
+                        device,
+                        access,
+                        profile: ProfileSelectionMode::Auto(profile),
+                    },
+                );
             }
             CaptureEvent::Input(batch) => {
-                for event in batch.events {
+                for event in &batch.events {
                     self.values.insert(
                         (batch.source_id.clone(), event.event_type, event.code),
                         event.value,
@@ -30,6 +52,7 @@ impl TesterState {
                 }
                 self.log
                     .push(format!("frame {} from {}", batch.sequence, batch.source_id));
+                self.frames.push(batch);
             }
             CaptureEvent::Disconnected { source_id, .. } => {
                 self.sources.remove(&source_id);
@@ -48,16 +71,40 @@ impl TesterState {
     }
 
     #[must_use]
-    pub fn sources(&self) -> &BTreeMap<SourceId, DeviceDescriptor> {
+    pub fn sources(&self) -> &BTreeMap<SourceId, TesterSource> {
         &self.sources
     }
     #[must_use]
     pub fn values(&self) -> &BTreeMap<(SourceId, u16, u16), i32> {
         &self.values
     }
+    /// Complete native frames in the order the tester observed them.
+    #[must_use]
+    pub fn frames(&self) -> &[EventBatch] {
+        &self.frames
+    }
     #[must_use]
     pub fn log(&self) -> &[String] {
         &self.log
+    }
+
+    /// Preview an explicit reader without discarding automatic candidates.
+    pub fn force_profile(&mut self, source_id: &SourceId, profile_id: ProfileId) {
+        if let Some(source) = self.sources.get_mut(source_id) {
+            let automatic = source.profile.automatic().clone();
+            source.profile = automatic.force(profile_id);
+            self.log
+                .push(format!("forced profile preview for {source_id}"));
+        }
+    }
+
+    /// Return a source to automatic profile selection.
+    pub fn clear_forced_profile(&mut self, source_id: &SourceId) {
+        if let Some(source) = self.sources.get_mut(source_id) {
+            source.profile = ProfileSelectionMode::Auto(source.profile.automatic().clone());
+            self.log
+                .push(format!("cleared forced profile preview for {source_id}"));
+        }
     }
 }
 
@@ -112,6 +159,7 @@ mod tests {
             }],
         }));
         assert_eq!(state.values().get(&(source.clone(), 3, 0)), Some(&-123));
+        assert_eq!(state.frames().len(), 1);
         state.apply(CaptureEvent::Disconnected {
             source_id: source,
             physical_id: device.physical_id,
@@ -140,5 +188,25 @@ mod tests {
                 .iter()
                 .any(|entry| entry.contains("fixture failure"))
         );
+    }
+
+    #[test]
+    fn forced_preview_retains_automatic_candidates() {
+        let device = device();
+        let source = device.source_id.clone();
+        let mut state = TesterState::default();
+        state.apply(CaptureEvent::Connected {
+            device,
+            access: CaptureAccess::Shared,
+        });
+        state.force_profile(&source, ProfileId::new("operator-reader"));
+        let profile = &state.sources()[&source].profile;
+        assert_eq!(
+            profile.forced_profile(),
+            Some(&ProfileId::new("operator-reader"))
+        );
+        assert_eq!(profile.automatic().candidates.len(), 1);
+        state.clear_forced_profile(&source);
+        assert_eq!(state.sources()[&source].profile.forced_profile(), None);
     }
 }
