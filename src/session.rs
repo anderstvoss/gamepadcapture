@@ -177,6 +177,7 @@ mod tests {
     struct FakeProvider {
         scans: VecDeque<Vec<DeviceDescriptor>>,
         fail_open: bool,
+        access: CaptureAccess,
     }
 
     impl CaptureProvider for FakeProvider {
@@ -199,7 +200,7 @@ mod tests {
                 access: if mode == AccessMode::Shared {
                     CaptureAccess::Shared
                 } else {
-                    CaptureAccess::Exclusive
+                    self.access
                 },
                 reads: VecDeque::new(),
             }))
@@ -234,6 +235,7 @@ mod tests {
         let provider = FakeProvider {
             scans: VecDeque::from([vec![pad.clone()], vec![], vec![]]),
             fail_open: false,
+            access: CaptureAccess::Exclusive,
         };
         let mut session = CaptureSession::new(provider, AccessMode::Exclusive);
         let first = session.poll().unwrap();
@@ -254,6 +256,7 @@ mod tests {
         let provider = FakeProvider {
             scans: VecDeque::from([vec![device()]]),
             fail_open: true,
+            access: CaptureAccess::Exclusive,
         };
         let mut session = CaptureSession::new(provider, AccessMode::Exclusive);
         let events = session.poll().unwrap();
@@ -263,5 +266,42 @@ mod tests {
                 if error.kind == CaptureErrorKind::ExclusiveGrab
         ));
         assert!(session.connected_devices().is_empty());
+    }
+
+    #[test]
+    fn duplicate_discovery_entries_open_one_source_once() {
+        let pad = device();
+        let provider = FakeProvider {
+            scans: VecDeque::from([vec![pad.clone(), pad], vec![]]),
+            fail_open: false,
+            access: CaptureAccess::Exclusive,
+        };
+        let mut session = CaptureSession::new(provider, AccessMode::Exclusive);
+        let events = session.poll().unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, CaptureEvent::Connected { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(session.connected_devices().len(), 1);
+    }
+
+    #[test]
+    fn preferred_exclusive_fallback_remains_visible() {
+        let provider = FakeProvider {
+            scans: VecDeque::from([vec![device()]]),
+            fail_open: false,
+            access: CaptureAccess::SharedFallback,
+        };
+        let mut session = CaptureSession::new(provider, AccessMode::PreferExclusive);
+        assert!(matches!(
+            session.poll().unwrap()[0],
+            CaptureEvent::Connected {
+                access: CaptureAccess::SharedFallback,
+                ..
+            }
+        ));
     }
 }

@@ -55,6 +55,15 @@ impl FixtureManifest {
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+
+    /// Parse a shared fixture manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid JSON or schema errors from `serde_json`.
+    pub fn from_json(input: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(input)
+    }
 }
 
 /// One non-sensitive source entry in a [`FixtureManifest`].
@@ -233,5 +242,6 @@ mod tests {
         let json = manifest.to_json_pretty().unwrap();
         assert!(json.contains("\"format_version\": 1"));
         assert!(!json.contains("private"));
+        assert_eq!(FixtureManifest::from_json(&json).unwrap(), manifest);
     }
 }
