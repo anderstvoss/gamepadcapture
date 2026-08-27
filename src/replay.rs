@@ -5,6 +5,8 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     CaptureAccess, CaptureError, CaptureErrorKind, CaptureProvider, DeviceDescriptor,
     DiscoverySnapshot, EventBatch, EventSource, SourceId,
@@ -15,7 +17,7 @@ use crate::{
 /// This deliberately omits device paths, physical paths, unique IDs, serials,
 /// and Bluetooth addresses. Hardware recordings may retain those values in a
 /// private bundle, but shared fixtures must use this manifest form.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FixtureManifest {
     pub format_version: u32,
     pub synthetic: bool,
@@ -44,10 +46,19 @@ impl FixtureManifest {
                 .collect(),
         }
     }
+
+    /// Serialize the public, sanitized manifest as stable pretty JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns serialization failures from `serde_json`.
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
 }
 
 /// One non-sensitive source entry in a [`FixtureManifest`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FixtureSource {
     pub reported_name: String,
     pub bus_type: u16,
@@ -219,5 +230,8 @@ mod tests {
         assert!(!debug.contains("private-path"));
         assert!(!debug.contains("private-topology"));
         assert!(!debug.contains("private-serial"));
+        let json = manifest.to_json_pretty().unwrap();
+        assert!(json.contains("\"format_version\": 1"));
+        assert!(!json.contains("private"));
     }
 }

@@ -113,6 +113,16 @@ cargo run --features tester --bin gamepad-tester
 
 It is a passive evidence viewer: it does not normalize inputs, create virtual
 controllers, write controller output, or change host permissions.
+
+Create a safe synthetic capture-lab manifest without controller hardware:
+
+```bash
+cargo run --features fixture-lab --bin capture-lab -- --synthetic manifest.json
+```
+
+`capture-lab --live manifest.json` performs Linux evdev discovery only. Its
+versioned JSON omits paths, serials, unique IDs, and Bluetooth addresses; it
+does not open a capture stream or write controller output.
 Linux hardware validation should additionally cover two identical serial-less
 controllers, Bluetooth reconnects, compound controller interfaces, hot-unplug
 during input, exclusive-grab contention, and an evdev ring-buffer overrun.
