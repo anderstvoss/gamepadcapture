@@ -121,9 +121,10 @@ Create a safe synthetic capture-lab manifest without controller hardware:
 cargo run --features fixture-lab --bin capture-lab -- --synthetic manifest.json
 ```
 
-`capture-lab --live manifest.json` performs Linux evdev discovery only. Its
-versioned JSON omits paths, serials, unique IDs, and Bluetooth addresses; it
-does not open a capture stream or write controller output.
+`capture-lab --live recording.json [poll-count]` performs bounded shared Linux
+evdev capture (250 polls by default) and stores native frames by sanitized
+source index. Its versioned JSON omits paths, serials, unique IDs, and
+Bluetooth addresses; it never writes controller output.
 Linux hardware validation should additionally cover two identical serial-less
 controllers, Bluetooth reconnects, compound controller interfaces, hot-unplug
 during input, exclusive-grab contention, and an evdev ring-buffer overrun.

@@ -3,7 +3,10 @@
 //! Replay inputs are deliberately native [`EventBatch`] values. They do not
 //! normalize controller controls or depend on `/dev/input`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    time::UNIX_EPOCH,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +79,74 @@ pub struct FixtureSource {
     pub version: u16,
     pub transport: String,
     pub control_count: usize,
+}
+
+/// A sanitized fixture bundle containing the discovery manifest and raw frames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureRecording {
+    pub manifest: FixtureManifest,
+    pub frames: Vec<FixtureFrame>,
+}
+
+impl FixtureRecording {
+    /// Convert native batches to a bundle without retaining source paths or IDs.
+    #[must_use]
+    pub fn sanitized(
+        manifest: FixtureManifest,
+        batches: &[EventBatch],
+        source_indices: &BTreeMap<SourceId, usize>,
+    ) -> Self {
+        let frames = batches
+            .iter()
+            .filter_map(|batch| {
+                let source_index = *source_indices.get(&batch.source_id)?;
+                Some(FixtureFrame {
+                    source_index,
+                    sequence: batch.sequence,
+                    events: batch
+                        .events
+                        .iter()
+                        .map(|event| FixtureNativeEvent {
+                            timestamp_micros: event
+                                .timestamp
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |duration| duration.as_micros()),
+                            event_type: event.event_type,
+                            code: event.code,
+                            value: event.value,
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
+        Self { manifest, frames }
+    }
+
+    /// Serialize the shared bundle as pretty JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns serialization failures from `serde_json`.
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+}
+
+/// One native event frame, indexed into [`FixtureManifest::sources`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureFrame {
+    pub source_index: usize,
+    pub sequence: u64,
+    pub events: Vec<FixtureNativeEvent>,
+}
+
+/// Timestamped native input evidence stored in a fixture frame.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureNativeEvent {
+    pub timestamp_micros: u128,
+    pub event_type: u16,
+    pub code: u16,
+    pub value: i32,
 }
 
 /// Read results emitted by one source when it is opened by [`ReplayProvider`].
@@ -172,6 +243,7 @@ impl EventSource for ReplaySource {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::SystemTime;
 
     use super::*;
     use crate::{
@@ -243,5 +315,34 @@ mod tests {
         assert!(json.contains("\"format_version\": 1"));
         assert!(!json.contains("private"));
         assert_eq!(FixtureManifest::from_json(&json).unwrap(), manifest);
+    }
+
+    #[test]
+    fn recording_uses_source_indices_not_private_source_ids() {
+        let descriptor = device();
+        let manifest = FixtureManifest::sanitized(true, &[descriptor.clone()]);
+        let indices = BTreeMap::from([(descriptor.source_id.clone(), 0)]);
+        let recording = FixtureRecording::sanitized(
+            manifest,
+            &[EventBatch {
+                source_id: descriptor.source_id,
+                sequence: 3,
+                events: vec![crate::NativeEvent {
+                    timestamp: SystemTime::UNIX_EPOCH,
+                    event_type: 3,
+                    code: 1,
+                    value: 42,
+                }],
+            }],
+            &indices,
+        );
+        assert_eq!(recording.frames[0].source_index, 0);
+        assert_eq!(recording.frames[0].events[0].value, 42);
+        assert!(
+            !recording
+                .to_json_pretty()
+                .unwrap()
+                .contains("fixture-source")
+        );
     }
 }

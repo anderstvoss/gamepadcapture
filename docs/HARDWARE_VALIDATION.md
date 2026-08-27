@@ -39,8 +39,9 @@ creating unrelated behavior.
 
 ## Capture-lab artifact
 
-Build a guided `capture-lab` tool before first physical validation. It must
-produce a sanitized, versioned bundle containing:
+The current `capture-lab` records a sanitized manifest and bounded native evdev
+frames. Extend it with the remaining fields only alongside their validated
+backends. The eventual sanitized, versioned bundle contains:
 
 ```text
 manifest.json       host/backend versions, device identity, topology redaction policy
