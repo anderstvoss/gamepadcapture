@@ -10,7 +10,8 @@ ignore = ["RUSTSEC-2026-0192"]
 
 [licenses]
 # These are reviewed, permissive transitive licenses required by the optional
-# native eframe tester. Keep the allow-list explicit so new licenses fail CI.
+# native eframe tester and Serde's macro graph. Keep the allow-list explicit
+# so new licenses fail CI.
 allow = ["AGPL-3.0-only", "Apache-2.0", "MIT", "BSL-1.0", "ISC", "OFL-1.1", "Unicode-3.0", "Ubuntu-font-1.0", "Zlib"]
 confidence-threshold = 0.8
 
