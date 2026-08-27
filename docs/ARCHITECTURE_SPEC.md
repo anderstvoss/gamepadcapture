@@ -51,15 +51,17 @@ physical hardware
 - `EventBatch` preserves native frame boundaries and values. IUCM performs all
   semantic translation after this boundary.
 
-The present Linux evdev backend implements this first layer. Future HID and SDL
+The present Linux evdev backend implements this first layer. The experimental
+pure `hid` feature can parse and replay sanitized HID descriptors/reports, but
+it does not open hidraw devices or transmit output. Future live HID and SDL
 backends add complementary evidence; they do not replace evdev data.
 
 ### Current implementation status
 
 The repository currently implements Linux evdev discovery/capture, identity
 stability, exclusive-grab reporting, session lifecycle handling, and a pure
-initial profile selector. It does **not** yet implement hidraw, HID descriptors
-or report preservation, SDL runtime enumeration, Windows/macOS backends,
+initial profile selector. It does **not** yet implement hidraw or live HID
+descriptor/report capture, SDL runtime enumeration, Windows/macOS backends,
 protocol decoders, or output channels. References to those elements below are
 target architecture, not claims of present support.
 

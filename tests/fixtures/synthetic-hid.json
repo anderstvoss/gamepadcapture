@@ -1,0 +1,29 @@
+{
+  "format_version": 1,
+  "synthetic": true,
+  "descriptor": [5, 1, 9, 5, 161, 1, 133, 1, 117, 8, 149, 2, 9, 48, 9, 49, 129, 2, 192],
+  "reports": [
+    { "report_type": "Input", "bytes": [1, 12, 244, 99] },
+    { "report_type": "Output", "bytes": [1, 0] }
+  ],
+  "hid_endpoint": {
+    "fixture_index": 0,
+    "evidence": {
+      "identity": { "bus_type": 3, "vendor_id": 0, "product_id": 0, "version": 1 },
+      "transport": "Virtual",
+      "topology_token": null,
+      "connection_token": null
+    }
+  },
+  "evdev_endpoints": [
+    {
+      "fixture_index": 1,
+      "evidence": {
+        "identity": { "bus_type": 3, "vendor_id": 0, "product_id": 0, "version": 1 },
+        "transport": "Virtual",
+        "topology_token": null,
+        "connection_token": null
+      }
+    }
+  ]
+}

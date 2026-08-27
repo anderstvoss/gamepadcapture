@@ -2,10 +2,20 @@
 
 use std::collections::BTreeMap;
 
+use crate::hid::{HidDescriptor, HidFixture, HidReportFrame, HidReportLayout, frame_report};
 use crate::{
     AutoProfileDetector, CaptureAccess, CaptureEvent, DeviceDescriptor, EventBatch, ProfileId,
     ProfileSelectionMode, SourceId,
 };
+
+/// Pure HID fixture evidence rendered beside native evdev evidence.
+#[derive(Debug, Clone)]
+pub struct TesterHidEvidence {
+    pub item_count: usize,
+    pub layouts: Vec<HidReportLayout>,
+    pub reports: Vec<HidReportFrame>,
+    pub diagnostics: Vec<String>,
+}
 
 /// The current state of one connected source, including the access result and
 /// inspectable automatic profile evidence.
@@ -22,6 +32,7 @@ pub struct TesterState {
     sources: BTreeMap<SourceId, TesterSource>,
     values: BTreeMap<(SourceId, u16, u16), i32>,
     frames: Vec<EventBatch>,
+    hid: Option<TesterHidEvidence>,
     log: Vec<String>,
 }
 
@@ -88,6 +99,43 @@ impl TesterState {
         &self.log
     }
 
+    /// Apply a sanitized HID fixture without opening a hidraw device.
+    ///
+    /// # Errors
+    ///
+    /// Returns descriptor parsing errors after recording them for inspection.
+    pub fn apply_hid_fixture(
+        &mut self,
+        fixture: &HidFixture,
+    ) -> Result<(), crate::hid::HidDescriptorError> {
+        let descriptor = match HidDescriptor::parse(&fixture.descriptor) {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                self.log.push(format!("HID descriptor error: {error}"));
+                return Err(error);
+            }
+        };
+        let mut diagnostics = Vec::new();
+        for report in &fixture.reports {
+            if let Err(error) = frame_report(&descriptor, report) {
+                diagnostics.push(error.to_string());
+            }
+        }
+        self.hid = Some(TesterHidEvidence {
+            item_count: descriptor.items.len(),
+            layouts: descriptor.layouts,
+            reports: fixture.reports.clone(),
+            diagnostics,
+        });
+        self.log.push("applied synthetic HID fixture".to_owned());
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn hid(&self) -> Option<&TesterHidEvidence> {
+        self.hid.as_ref()
+    }
+
     /// Preview an explicit reader without discarding automatic candidates.
     pub fn force_profile(&mut self, source_id: &SourceId, profile_id: ProfileId) {
         if let Some(source) = self.sources.get_mut(source_id) {
@@ -111,6 +159,10 @@ impl TesterState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hid::{
+        EndpointEvidence, EndpointFixture, FixtureDeviceIdentity, HidFixture, HidReportType,
+        TransportFixture,
+    };
     use crate::{
         CaptureAccess, ControllerClass, DeviceIdentity, DeviceProvenance, EventBatch,
         IdentityStability, NativeEvent, PhysicalDeviceId, Transport,
@@ -208,5 +260,36 @@ mod tests {
         assert_eq!(profile.automatic().candidates.len(), 1);
         state.clear_forced_profile(&source);
         assert_eq!(state.sources()[&source].profile.forced_profile(), None);
+    }
+
+    #[test]
+    fn state_keeps_hid_fixture_parse_and_report_errors() {
+        let fixture = HidFixture::new(
+            true,
+            vec![0x75, 8, 0x95, 1, 0x81, 2],
+            vec![HidReportFrame {
+                report_type: HidReportType::Input,
+                bytes: Vec::new(),
+            }],
+            EndpointFixture {
+                fixture_index: 0,
+                evidence: EndpointEvidence {
+                    identity: FixtureDeviceIdentity {
+                        bus_type: 3,
+                        vendor_id: 1,
+                        product_id: 2,
+                        version: 1,
+                    },
+                    transport: TransportFixture::Usb,
+                    topology_token: None,
+                    connection_token: None,
+                },
+            },
+            Vec::new(),
+        );
+        let mut state = TesterState::default();
+        state.apply_hid_fixture(&fixture).unwrap();
+        assert_eq!(state.hid().unwrap().layouts.len(), 1);
+        assert_eq!(state.hid().unwrap().diagnostics.len(), 1);
     }
 }

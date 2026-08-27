@@ -21,3 +21,15 @@ jobs:
           toolchain: nightly
       - run: cargo install cargo-fuzz --locked
       - run: cargo fuzz run profile_selection --fuzz-dir fuzz -- -max_total_time=60
+  hid-descriptor-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo fuzz run hid_descriptor_report --fuzz-dir fuzz -- -max_total_time=60

@@ -16,3 +16,8 @@ configuration. They must clearly state that they are synthetic.
 `synthetic-manifest.json` is the minimal version-1 public fixture contract. It
 contains no host paths, topology, serial, or Bluetooth-address data and is
 parsed by the integration test suite.
+
+`synthetic-hid.json` is a separate version-1 experimental HID descriptor and
+opaque report fixture. It contains only fixture-local endpoint indices and
+opaque numeric evidence tokens; it must never acquire paths, serials,
+Bluetooth addresses, or source IDs.
