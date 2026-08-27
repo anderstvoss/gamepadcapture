@@ -11,8 +11,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CaptureAccess, CaptureError, CaptureErrorKind, CaptureProvider, DeviceDescriptor,
-    DiscoverySnapshot, EventBatch, EventSource, SourceId,
+    CaptureAccess, CaptureError, CaptureErrorKind, CaptureProvider, ControlDescriptor,
+    DeviceDescriptor, DiscoverySnapshot, EventBatch, EventSource, SourceId,
 };
 
 /// A sanitized, versioned description of fixture sources.
@@ -85,7 +85,11 @@ pub struct FixtureSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FixtureRecording {
     pub manifest: FixtureManifest,
+    /// Native controls without kernel labels, paths, or persistent IDs.
+    pub controls: Vec<FixtureControl>,
     pub frames: Vec<FixtureFrame>,
+    /// Labeled frame ranges and optional operator notes from the capture session.
+    pub segments: Vec<FixtureSegment>,
 }
 
 impl FixtureRecording {
@@ -95,6 +99,51 @@ impl FixtureRecording {
         manifest: FixtureManifest,
         batches: &[EventBatch],
         source_indices: &BTreeMap<SourceId, usize>,
+    ) -> Self {
+        Self::with_controls(manifest, Vec::new(), batches, source_indices, Vec::new())
+    }
+
+    /// Create a complete public capture bundle from descriptors, frames, and notes.
+    ///
+    /// Names, paths, unique identifiers, serials, and Bluetooth addresses are
+    /// intentionally excluded from the control records and observations are
+    /// caller-provided text that must be reviewed before sharing.
+    #[must_use]
+    pub fn sanitized_capture(
+        manifest: FixtureManifest,
+        devices: &[DeviceDescriptor],
+        batches: &[EventBatch],
+        source_indices: &BTreeMap<SourceId, usize>,
+        operator_observations: Vec<String>,
+    ) -> Self {
+        let controls = devices
+            .iter()
+            .filter_map(|device| {
+                source_indices
+                    .get(&device.source_id)
+                    .map(|index| (*index, &device.controls))
+            })
+            .flat_map(|(source_index, controls)| {
+                controls
+                    .iter()
+                    .map(move |control| FixtureControl::from_native(source_index, control))
+            })
+            .collect();
+        Self::with_controls(
+            manifest,
+            controls,
+            batches,
+            source_indices,
+            operator_observations,
+        )
+    }
+
+    fn with_controls(
+        manifest: FixtureManifest,
+        controls: Vec<FixtureControl>,
+        batches: &[EventBatch],
+        source_indices: &BTreeMap<SourceId, usize>,
+        operator_observations: Vec<String>,
     ) -> Self {
         let frames = batches
             .iter()
@@ -118,8 +167,19 @@ impl FixtureRecording {
                         .collect(),
                 })
             })
-            .collect();
-        Self { manifest, frames }
+            .collect::<Vec<_>>();
+        let segments = vec![FixtureSegment {
+            label: "bounded-capture".to_owned(),
+            first_frame: 0,
+            frame_count: frames.len(),
+            operator_observations,
+        }];
+        Self {
+            manifest,
+            controls,
+            frames,
+            segments,
+        }
     }
 
     /// Serialize the shared bundle as pretty JSON.
@@ -130,6 +190,67 @@ impl FixtureRecording {
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+}
+
+/// One control advertised by a source, represented without a local label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureControl {
+    pub source_index: usize,
+    pub event_type: u16,
+    pub code: u16,
+    pub absolute_range: Option<FixtureAxisRange>,
+}
+
+impl FixtureControl {
+    fn from_native(source_index: usize, control: &ControlDescriptor) -> Self {
+        match control {
+            ControlDescriptor::Key { code, .. } => Self::simple(source_index, 1, *code),
+            ControlDescriptor::RelativeAxis { code, .. } => Self::simple(source_index, 2, *code),
+            ControlDescriptor::AbsoluteAxis { code, info, .. } => Self {
+                source_index,
+                event_type: 3,
+                code: *code,
+                absolute_range: Some(FixtureAxisRange {
+                    minimum: info.minimum,
+                    maximum: info.maximum,
+                    fuzz: info.fuzz,
+                    flat: info.flat,
+                    resolution: info.resolution,
+                }),
+            },
+            ControlDescriptor::Switch { code, .. } => Self::simple(source_index, 5, *code),
+            ControlDescriptor::Led { code, .. } => Self::simple(source_index, 17, *code),
+            ControlDescriptor::ForceFeedback { code, .. } => Self::simple(source_index, 21, *code),
+        }
+    }
+
+    const fn simple(source_index: usize, event_type: u16, code: u16) -> Self {
+        Self {
+            source_index,
+            event_type,
+            code,
+            absolute_range: None,
+        }
+    }
+}
+
+/// Advertised native absolute-axis bounds and tuning metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureAxisRange {
+    pub minimum: i32,
+    pub maximum: i32,
+    pub fuzz: i32,
+    pub flat: i32,
+    pub resolution: i32,
+}
+
+/// A named interval of frames together with reviewed operator observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureSegment {
+    pub label: String,
+    pub first_frame: usize,
+    pub frame_count: usize,
+    pub operator_observations: Vec<String>,
 }
 
 /// One native event frame, indexed into [`FixtureManifest::sources`].
@@ -247,8 +368,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AccessMode, CaptureEvent, CaptureSession, ControllerClass, DeviceIdentity,
-        DeviceProvenance, IdentityStability, PhysicalDeviceId, Transport,
+        AbsoluteAxisInfo, AccessMode, CaptureEvent, CaptureSession, ControlDescriptor,
+        ControllerClass, DeviceIdentity, DeviceProvenance, IdentityStability, PhysicalDeviceId,
+        Transport,
     };
 
     fn device() -> DeviceDescriptor {
@@ -269,7 +391,18 @@ mod tests {
             device_path: PathBuf::from("/private/path"),
             physical_path: Some("private-topology".to_owned()),
             unique_id: Some("private-serial".to_owned()),
-            controls: Vec::new(),
+            controls: vec![ControlDescriptor::AbsoluteAxis {
+                code: 0,
+                name: "private-control-label".to_owned(),
+                info: AbsoluteAxisInfo {
+                    minimum: -10,
+                    maximum: 10,
+                    current: 0,
+                    fuzz: 1,
+                    flat: 2,
+                    resolution: 3,
+                },
+            }],
         }
     }
 
@@ -343,6 +476,37 @@ mod tests {
                 .to_json_pretty()
                 .unwrap()
                 .contains("fixture-source")
+        );
+    }
+
+    #[test]
+    fn recording_includes_sanitized_controls_and_observations() {
+        let descriptor = device();
+        let manifest = FixtureManifest::sanitized(false, &[descriptor.clone()]);
+        let indices = BTreeMap::from([(descriptor.source_id.clone(), 0)]);
+        let recording = FixtureRecording::sanitized_capture(
+            manifest,
+            &[descriptor],
+            &[],
+            &indices,
+            vec!["operator saw the synthetic test".to_owned()],
+        );
+        assert_eq!(recording.controls.len(), 1);
+        assert_eq!(recording.controls[0].event_type, 3);
+        assert_eq!(
+            recording.controls[0]
+                .absolute_range
+                .as_ref()
+                .unwrap()
+                .maximum,
+            10
+        );
+        assert_eq!(recording.segments[0].operator_observations.len(), 1);
+        assert!(
+            !recording
+                .to_json_pretty()
+                .unwrap()
+                .contains("private-control-label")
         );
     }
 }

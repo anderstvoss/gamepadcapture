@@ -26,7 +26,7 @@ pub use profile::{
     ProfileSelection, ProfileSelectionMode,
 };
 pub use replay::{
-    FixtureFrame, FixtureManifest, FixtureNativeEvent, FixtureRecording, FixtureSource,
-    ReplayProvider, ReplaySourcePlan,
+    FixtureAxisRange, FixtureControl, FixtureFrame, FixtureManifest, FixtureNativeEvent,
+    FixtureRecording, FixtureSegment, FixtureSource, ReplayProvider, ReplaySourcePlan,
 };
 pub use session::{CaptureProvider, CaptureSession, EventSource};
