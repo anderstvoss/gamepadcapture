@@ -103,6 +103,15 @@ nightly Rust toolchain:
 ```bash
 cargo install cargo-fuzz --locked
 cargo fuzz run profile_selection --fuzz-dir fuzz -- -max_total_time=60
+cargo fuzz run hid_descriptor_report --fuzz-dir fuzz -- -max_total_time=60
+```
+
+The default-off `hid` feature provides experimental, pure descriptor parsing,
+opaque report framing, and synthetic endpoint pairing. It performs no hidraw
+I/O and cannot write controller output:
+
+```bash
+cargo test --features hid
 ```
 
 The optional native diagnostics window is available without changing library

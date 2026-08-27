@@ -15,6 +15,7 @@ use std::{
 };
 
 use eframe::egui;
+use gamepad_capture::hid::HidFixture;
 use gamepad_capture::tester::{TesterSource, TesterState};
 use gamepad_capture::{
     AbsoluteAxisInfo, AccessMode, CaptureAccess, CaptureEvent, CaptureSession, ControlDescriptor,
@@ -191,6 +192,34 @@ fn render_lifecycle(ui: &mut egui::Ui, state: &TesterState) {
     }
 }
 
+fn render_hid(ui: &mut egui::Ui, state: &TesterState) {
+    ui.separator();
+    ui.heading("Experimental HID fixture evidence");
+    let Some(hid) = state.hid() else {
+        ui.weak("No HID fixture replayed. This tester never opens hidraw devices.");
+        return;
+    };
+    ui.monospace(format!("descriptor items: {}", hid.item_count));
+    for layout in &hid.layouts {
+        ui.monospace(format!(
+            "{:?} report ID {}: {} bits, {} fields",
+            layout.report_type,
+            layout.report_id,
+            layout.payload_bits,
+            layout.fields.len()
+        ));
+    }
+    for report in &hid.reports {
+        ui.monospace(format!(
+            "{:?} raw bytes: {:02x?}",
+            report.report_type, report.bytes
+        ));
+    }
+    for diagnostic in &hid.diagnostics {
+        ui.colored_label(egui::Color32::YELLOW, diagnostic);
+    }
+}
+
 impl TesterApp {
     fn drain_events(&mut self) {
         if let Some(receiver) = &self.receiver {
@@ -222,6 +251,9 @@ impl TesterApp {
             }
             if ui.button("Show synthetic replay frame").clicked() {
                 self.synthetic_frame();
+            }
+            if ui.button("Show synthetic HID fixture").clicked() {
+                self.synthetic_hid_fixture();
             }
             if ui.button("Stop capture").clicked() {
                 self.stop_capture();
@@ -264,6 +296,7 @@ impl TesterApp {
             });
             render_axis_values(ui, &self.state);
             render_frames(ui, &self.state);
+            render_hid(ui, &self.state);
             render_lifecycle(ui, &self.state);
         });
     }
@@ -339,6 +372,21 @@ impl TesterApp {
                 },
             ],
         }));
+    }
+
+    fn synthetic_hid_fixture(&mut self) {
+        match HidFixture::from_json(include_str!("../../tests/fixtures/synthetic-hid.json")) {
+            Ok(fixture) => {
+                let _ = self.state.apply_hid_fixture(&fixture);
+            }
+            Err(error) => self.state.apply(CaptureEvent::SourceError {
+                source_id: SourceId::new("synthetic-hid-fixture"),
+                error: gamepad_capture::CaptureError::new(
+                    gamepad_capture::CaptureErrorKind::InvalidDevice,
+                    error.to_string(),
+                ),
+            }),
+        }
     }
 }
 

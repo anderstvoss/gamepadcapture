@@ -9,11 +9,18 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-gamepad-capture = { path = ".." }
+gamepad-capture = { path = "..", features = ["hid"] }
 
 [[bin]]
 name = "profile_selection"
 path = "fuzz_targets/profile_selection.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hid_descriptor_report"
+path = "fuzz_targets/hid_descriptor_report.rs"
 test = false
 doc = false
 bench = false

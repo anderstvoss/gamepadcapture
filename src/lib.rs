@@ -7,6 +7,13 @@ mod profile;
 mod replay;
 mod session;
 
+/// Experimental pure HID descriptor and report-fixture support.
+///
+/// This feature has no hidraw I/O or output transport. Hardware validation is
+/// required before it can support a live backend or verified capabilities.
+#[cfg(feature = "hid")]
+pub mod hid;
+
 #[cfg(feature = "tester")]
 pub mod tester;
 
