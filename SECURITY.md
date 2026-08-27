@@ -9,11 +9,8 @@ support policy is published.
 
 Do not open public issues for suspected vulnerabilities.
 
-Use this repository's **Private Vulnerability Reporting** form:
+Use this repository's enabled **Private Vulnerability Reporting** form:
 `https://github.com/anderstvoss/gamepadcapture/security/advisories/new`.
-Enable it in GitHub repository settings before accepting external
-contributions.
-
 Include the affected version or commit, reproduction steps, impact, and any
 suggested remediation. The maintainers aim to acknowledge reports within seven
 days and will coordinate a disclosure timeline before publishing an advisory.
