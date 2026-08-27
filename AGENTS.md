@@ -78,6 +78,30 @@ Acceptance: all tests run without `/dev/input`, a connected controller, or
 network access. The implementation must be a small, backwards-considered public
 API change with rustdoc explaining the evidence and override behavior.
 
+## Security follow-up: Scorecard findings
+
+The public repository's workflow runs pass, but OpenSSF Scorecard publishes five
+open Code Scanning findings. Address them as a focused follow-up:
+
+1. In `.github/workflows/scorecard.yml`, remove the top-level
+   `security-events: write` permission and retain it only on the `analysis`
+   job that uploads SARIF.
+2. Decide and document an enforceable code-review policy; configure branch
+   protection to match it before claiming the Scorecard code-review finding is
+   resolved.
+3. Establish a maintenance signal (for example, release/support expectations
+   and responsive issue handling) instead of dismissing the maintenance
+   finding without evidence.
+4. Add an appropriate Rust fuzzing target and a reproducible local/CI entry
+   point, or explicitly document why fuzzing is deferred for this early API.
+5. Review the CII Best Practices criteria and address only requirements that
+   fit this project's scope. Do not weaken security controls merely to raise a
+   score.
+
+Keep security findings open until the corresponding public evidence or
+configuration is in place. Do not close alerts as false positives solely
+because CI is green.
+
 ## Working practice
 
 - Prefer pure parsers, deterministic fake providers, and fixtures over live
