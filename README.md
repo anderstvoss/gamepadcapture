@@ -104,6 +104,15 @@ cargo install cargo-fuzz --locked
 cargo fuzz run profile_selection --fuzz-dir fuzz -- -max_total_time=60
 ```
 
+The optional native diagnostics window is available without changing library
+consumers:
+
+```bash
+cargo run --features tester --bin gamepad-tester
+```
+
+It is a passive evidence viewer: it does not normalize inputs, create virtual
+controllers, write controller output, or change host permissions.
 Linux hardware validation should additionally cover two identical serial-less
 controllers, Bluetooth reconnects, compound controller interfaces, hot-unplug
 during input, exclusive-grab contention, and an evdev ring-buffer overrun.
