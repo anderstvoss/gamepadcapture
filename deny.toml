@@ -3,10 +3,15 @@ all-features = true
 
 [advisories]
 version = 2
-ignore = []
+# eframe 0.31.1 transitively uses ttf-parser; RUSTSEC reports maintenance
+# status rather than a fixable vulnerability and identifies no safe upgrade.
+# Re-evaluate when egui/eframe removes this dependency.
+ignore = ["RUSTSEC-2026-0192"]
 
 [licenses]
-allow = ["AGPL-3.0-only", "Apache-2.0", "MIT"]
+# These are reviewed, permissive transitive licenses required by the optional
+# native eframe tester. Keep the allow-list explicit so new licenses fail CI.
+allow = ["AGPL-3.0-only", "Apache-2.0", "MIT", "BSL-1.0", "ISC", "OFL-1.1", "Unicode-3.0", "Ubuntu-font-1.0", "Zlib"]
 confidence-threshold = 0.8
 
 [bans]
