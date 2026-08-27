@@ -224,6 +224,8 @@ pub enum CaptureErrorKind {
     PermissionDenied,
     ExclusiveGrab,
     Read,
+    /// The kernel reported `SYN_DROPPED`; incomplete native evidence was discarded.
+    SynchronizationLost,
     InvalidDevice,
     UnsupportedPlatform,
 }
