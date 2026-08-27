@@ -25,9 +25,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@bc0b696b4103f5fe60f15749af68a046868d511a # v2.25.4
+      - uses: github/codeql-action/init@6bc82e05fd0ea64601dd4b465378bbcf57de0314 # v4.32.1
         with:
           languages: rust
           queries: security-extended
       - run: cargo build --all-targets --all-features
-      - uses: github/codeql-action/analyze@bc0b696b4103f5fe60f15749af68a046868d511a # v2.25.4
+      - uses: github/codeql-action/analyze@6bc82e05fd0ea64601dd4b465378bbcf57de0314 # v4.32.1
