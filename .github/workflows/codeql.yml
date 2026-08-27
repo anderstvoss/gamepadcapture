@@ -1,0 +1,33 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * 2'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    # Code scanning on private repositories requires GitHub Advanced Security.
+    # This automatically enables when the repository is made public.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@bc0b696b4103f5fe60f15749af68a046868d511a # v2.25.4
+        with:
+          languages: rust
+          queries: security-extended
+      - run: cargo build --all-targets --all-features
+      - uses: github/codeql-action/analyze@bc0b696b4103f5fe60f15749af68a046868d511a # v2.25.4
