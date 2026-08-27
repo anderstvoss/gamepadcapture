@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "synthetic": true,
+  "sources": [
+    {
+      "reported_name": "Synthetic controller",
+      "bus_type": 3,
+      "vendor_id": 65535,
+      "product_id": 1,
+      "version": 1,
+      "transport": "Usb",
+      "control_count": 4
+    }
+  ]
+}
