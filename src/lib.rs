@@ -25,5 +25,8 @@ pub use profile::{
     DeviceProfileAssignment, ProfileCandidate, ProfileEvidence, ProfileId, ProfileMatch,
     ProfileSelection, ProfileSelectionMode,
 };
-pub use replay::{FixtureManifest, FixtureSource, ReplayProvider, ReplaySourcePlan};
+pub use replay::{
+    FixtureFrame, FixtureManifest, FixtureNativeEvent, FixtureRecording, FixtureSource,
+    ReplayProvider, ReplaySourcePlan,
+};
 pub use session::{CaptureProvider, CaptureSession, EventSource};
