@@ -39,8 +39,10 @@ creating unrelated behavior.
 
 ## Capture-lab artifact
 
-The current `capture-lab` records a sanitized manifest and bounded native evdev
-frames. Extend it with the remaining fields only alongside their validated
+The current `capture-lab` records a sanitized manifest, native evdev controls,
+bounded native event frames, and labeled operator observations. Observations
+must be reviewed for serials, addresses, paths, and personal information before
+sharing. Extend it with the remaining fields only alongside their validated
 backends. The eventual sanitized, versioned bundle contains:
 
 ```text
