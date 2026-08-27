@@ -8,9 +8,18 @@ description = "Linux physical gamepad discovery and native evdev capture"
 repository = "https://github.com/anderstvoss/gamepadcapture"
 
 [dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13.2"
+
+[features]
+tester = ["dep:eframe"]
+
+[[bin]]
+name = "gamepad-tester"
+path = "src/bin/gamepad-tester.rs"
+required-features = ["tester"]
 
 [lints.rust]
 unsafe_code = "forbid"

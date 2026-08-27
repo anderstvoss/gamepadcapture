@@ -7,6 +7,9 @@ mod profile;
 mod replay;
 mod session;
 
+#[cfg(feature = "tester")]
+pub mod tester;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
