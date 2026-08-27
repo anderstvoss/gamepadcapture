@@ -1,14 +1,20 @@
 [package]
-name = "gamepadcapture"
+name = "gamepad-capture"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-only"
-description = "Safe game-controller input capture primitives"
+description = "Linux physical gamepad discovery and native evdev capture"
 repository = "https://github.com/anderstvoss/gamepadcapture"
-readme = "README.md"
-keywords = ["gamepad", "controller", "input"]
-categories = ["api-bindings", "hardware-support"]
 
-[lib]
-path = "src/lib.rs"
+[dependencies]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"

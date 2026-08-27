@@ -1,16 +1,24 @@
-//! Safe, explicit game-controller input capture primitives.
-//!
-//! The public API is intentionally not established yet.
+#![forbid(unsafe_code)]
+#![doc = include_str!("../README.md")]
 
-/// Returns the crate's current development status.
-pub const fn status() -> &'static str {
-    "pre-1.0"
-}
+mod identity;
+mod model;
+mod profile;
+mod session;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn reports_pre_release_status() {
-        assert_eq!(super::status(), "pre-1.0");
-    }
-}
+#[cfg(target_os = "linux")]
+pub mod linux;
+
+pub use identity::{build_physical_id, build_source_id};
+pub use model::{
+    AbsoluteAxisInfo, AccessMode, CaptureAccess, CaptureError, CaptureErrorKind, CaptureEvent,
+    ControlDescriptor, ControllerClass, DeviceDescriptor, DeviceIdentity, DeviceProvenance,
+    DiscoveryIssue, DiscoverySnapshot, EventBatch, IdentityStability, NativeEvent,
+    PhysicalDeviceId, SourceId, Transport,
+};
+pub use profile::{
+    AutoProfileDetector, CaptureProfile, CaptureProfileFamily, DetectionConfidence,
+    DeviceProfileAssignment, ProfileCandidate, ProfileEvidence, ProfileId, ProfileMatch,
+    ProfileSelection, ProfileSelectionMode,
+};
+pub use session::{CaptureProvider, CaptureSession, EventSource};

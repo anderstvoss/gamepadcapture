@@ -1,29 +1,110 @@
-# GamepadCapture
+# gamepad-capture
 
-`gamepadcapture` is an early Rust foundation for safely capturing and
-interpreting game-controller input. It is deliberately small while its public
-API and supported platforms are being defined.
+`gamepad-capture` is a small Rust library for discovering Linux physical
+controllers, describing the controls they actually expose, and capturing their
+native evdev input. It is intended to be the physical-input layer beneath a
+later IUCM mapper and manager; it does not normalize, remap, route, or create
+virtual controllers.
 
-## Status
+The public model deliberately preserves:
 
-Pre-1.0. Do not rely on API stability or use it to make security decisions.
+- the kernel-reported interface name and input identity (bus, VID, PID, version);
+- the transport reported by the input bus rather than assuming USB;
+- every native key, axis, switch, LED, and force-feedback code;
+- absolute-axis minimum, maximum, current, fuzz, flat, and resolution values;
+- kernel synchronization-frame boundaries and native event values;
+- separate physical-device and event-source identities for compound devices;
+- identity stability (`Hardware`, `Topology`, or `ConnectionOnly`) so anonymous
+  devices are never mistaken for safe persisted assignments;
+- whether capture is shared, exclusive, or an explicitly reported fallback.
 
-## Development
+It also establishes the profile-selection seam needed for broad controller
+support: native profiles win only on explicit evidence, SDL **Joystick** is the
+portable generic fallback, and a requested virtual output profile is opaque
+policy for the later manager rather than capture-layer normalization.
 
-Install the Rust toolchain specified in `rust-toolchain.toml`, then run:
+The SDL fallback is currently a **selection contract**, not an implemented SDL
+backend. The existing runtime backend is Linux evdev; SDL Joystick integration
+is a planned, separately feature-gated phase.
 
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
+## Boundary
+
+```text
+physical device -> platform evidence -> capture profile -> native event batches -> IUCM -> virtualgamepad
+                    descriptor/reports   native/HID/SDL         no normalization   mapping
+                    identity             forced override allowed
+                    exclusive grab
 ```
 
-For contribution, security-reporting, and project-governance expectations,
-see [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Names such as `BTN_SOUTH` are diagnostic labels. The numeric `(event_type,
+code)` pair and advertised range are the contract. A later IUCM layer decides
+whether a physical control means `face_bottom`, `capture`, a paddle, or
+something controller-specific.
 
-## License
+## Example
 
-This project is intended to be licensed under GNU AGPL-3.0-only. Before the
-first public release, add the complete canonical license text and replace the
-copyright holder placeholder in [NOTICE](NOTICE).
+```rust,no_run
+#[cfg(target_os = "linux")]
+fn main() -> Result<(), gamepad_capture::CaptureError> {
+    use gamepad_capture::{AccessMode, CaptureEvent, CaptureSession};
+    use gamepad_capture::linux::EvdevProvider;
+
+    let mut capture = CaptureSession::new(EvdevProvider::new(), AccessMode::Exclusive);
+    loop {
+        for event in capture.poll()? {
+            match event {
+                CaptureEvent::Connected { device, access } => {
+                    println!("{} ({access:?})", device.reported_name);
+                }
+                CaptureEvent::Input(batch) => println!("{batch:?}"),
+                CaptureEvent::Disconnected { source_id, .. } => {
+                    println!("disconnected: {source_id}");
+                }
+                CaptureEvent::SourceError { source_id, error } => {
+                    eprintln!("{source_id}: {error}");
+                }
+                CaptureEvent::DiscoveryError(issue) => eprintln!("{issue:?}"),
+                _ => {}
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {}
+```
+
+Dropping a session drops its evdev handles and releases any exclusive grabs.
+Opening `/dev/input/event*` requires host permissions supplied by the embedding
+application or deployment environment. The library does not modify udev rules,
+permissions, kernel modules, or host configuration.
+
+## Validation
+
+```bash
+cargo run --example inspect
+cargo fmt --all -- --check
+cargo check --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+Linux hardware validation should additionally cover two identical serial-less
+controllers, Bluetooth reconnects, compound controller interfaces, hot-unplug
+during input, exclusive-grab contention, and an evdev ring-buffer overrun.
+
+## Project documents
+
+- [`ARCHITECTURE_SPEC.md`](docs/ARCHITECTURE_SPEC.md) defines the stable library
+  boundary, evidence model, profile policy, and platform seams.
+- [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) is the phased,
+  agent-executable plan, including gates that require no physical hardware.
+- [`HARDWARE_VALIDATION.md`](docs/HARDWARE_VALIDATION.md) defines the compact
+  benchmark-device lab and the recordings that become regression fixtures.
+
+## Governance
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing or reporting a
+security concern. This project is licensed under [AGPL-3.0-only](LICENSE).
