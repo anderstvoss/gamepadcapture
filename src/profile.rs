@@ -42,6 +42,10 @@ pub enum DetectionConfidence {
     Fallback,
     Tentative,
     Strong,
+    /// Confirmed by a sanitized physical recording and its regression fixture.
+    ///
+    /// Passive matching never produces this level. A product name, VID/PID, or
+    /// transport match is evidence for a candidate, not proof of feature parity.
     Verified,
 }
 
@@ -102,11 +106,54 @@ pub struct ProfileSelection {
     pub candidates: Vec<ProfileCandidate>,
 }
 
+impl ProfileSelection {
+    /// Apply an explicit capture-profile choice without losing automatic evidence.
+    #[must_use]
+    pub fn force(self, profile_id: ProfileId) -> ProfileSelectionMode {
+        ProfileSelectionMode::Forced {
+            profile_id,
+            automatic: self,
+        }
+    }
+}
+
 /// Whether the capture profile came from detection or an explicit user override.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileSelectionMode {
     Auto(ProfileSelection),
-    Forced(ProfileId),
+    /// A user-requested reader plus the automatic result it replaced.
+    ///
+    /// The automatic selection remains available for diagnostics and later
+    /// manager policy. The forced ID may be incompatible with the source; it is
+    /// an instruction to attempt that mechanical interpretation, not a claim
+    /// that the source has matching capabilities.
+    Forced {
+        profile_id: ProfileId,
+        automatic: ProfileSelection,
+    },
+}
+
+impl ProfileSelectionMode {
+    /// Returns the automatic result, including when a user override is active.
+    #[must_use]
+    pub const fn automatic(&self) -> &ProfileSelection {
+        match self {
+            Self::Auto(selection)
+            | Self::Forced {
+                automatic: selection,
+                ..
+            } => selection,
+        }
+    }
+
+    /// Returns the explicit capture choice, if one replaced automatic selection.
+    #[must_use]
+    pub const fn forced_profile(&self) -> Option<&ProfileId> {
+        match self {
+            Self::Auto(_) => None,
+            Self::Forced { profile_id, .. } => Some(profile_id),
+        }
+    }
 }
 
 /// Policy passed to the later routing layer without performing any routing here.
@@ -137,6 +184,11 @@ impl AutoProfileDetector {
     }
 
     /// Select the most specific passive profile; ties remain visible to the caller.
+    ///
+    /// This passive detector returns only [`DetectionConfidence::Tentative`],
+    /// [`DetectionConfidence::Strong`], or [`DetectionConfidence::Fallback`].
+    /// Fixture-backed hardware evidence is required before another layer may
+    /// represent a candidate as verified.
     #[must_use]
     pub fn detect(&self, device: &DeviceDescriptor) -> ProfileSelection {
         let mut candidates: Vec<_> = self
@@ -257,17 +309,107 @@ mod tests {
 
     #[test]
     fn output_profile_is_independent_of_capture_choice() {
+        let automatic = AutoProfileDetector::new(Vec::new(), ProfileId::new("sdl-joystick"))
+            .detect(&device(0xffff, 0x0001));
         let assignment = DeviceProfileAssignment {
-            capture: ProfileSelectionMode::Forced(ProfileId::new("sdl-joystick")),
+            capture: automatic.force(ProfileId::new("sdl-joystick")),
             requested_output_profile: Some(ProfileId::new("dualsense")),
         };
-        assert!(matches!(
-            assignment.capture,
-            ProfileSelectionMode::Forced(_)
-        ));
+        assert_eq!(
+            assignment.capture.forced_profile().unwrap().as_str(),
+            "sdl-joystick"
+        );
+        assert_eq!(
+            assignment.capture.automatic().selected.profile_id.as_str(),
+            "sdl-joystick"
+        );
         assert_eq!(
             assignment.requested_output_profile.unwrap().as_str(),
             "dualsense"
+        );
+    }
+
+    #[test]
+    fn transport_specific_profiles_are_selected_only_for_matching_transport() {
+        let detector = AutoProfileDetector::new(
+            vec![
+                CaptureProfile {
+                    id: ProfileId::new("usb"),
+                    family: CaptureProfileFamily::Protocol,
+                    matches: vec![ProfileMatch {
+                        vendor_id: Some(1),
+                        product_id: Some(2),
+                        transport: Some(Transport::Usb),
+                    }],
+                },
+                CaptureProfile {
+                    id: ProfileId::new("bluetooth"),
+                    family: CaptureProfileFamily::Protocol,
+                    matches: vec![ProfileMatch {
+                        vendor_id: Some(1),
+                        product_id: Some(2),
+                        transport: Some(Transport::Bluetooth),
+                    }],
+                },
+            ],
+            ProfileId::new("sdl-joystick"),
+        );
+        let mut bluetooth = device(1, 2);
+        bluetooth.transport = Transport::Bluetooth;
+        let selection = detector.detect(&bluetooth);
+        assert_eq!(selection.selected.profile_id.as_str(), "bluetooth");
+        assert_eq!(selection.candidates.len(), 2);
+    }
+
+    #[test]
+    fn ties_are_sorted_and_remain_ambiguous_to_the_caller() {
+        let detector = AutoProfileDetector::new(
+            vec!["zeta", "alpha"]
+                .into_iter()
+                .map(|id| CaptureProfile {
+                    id: ProfileId::new(id),
+                    family: CaptureProfileFamily::Protocol,
+                    matches: vec![ProfileMatch {
+                        vendor_id: Some(1),
+                        product_id: Some(2),
+                        transport: None,
+                    }],
+                })
+                .collect(),
+            ProfileId::new("sdl-joystick"),
+        );
+        let selection = detector.detect(&device(1, 2));
+        assert_eq!(selection.selected.profile_id.as_str(), "alpha");
+        assert_eq!(
+            selection
+                .candidates
+                .iter()
+                .map(|candidate| candidate.profile_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta", "sdl-joystick"]
+        );
+    }
+
+    #[test]
+    fn passive_detector_never_claims_verified_evidence() {
+        let detector = AutoProfileDetector::new(
+            vec![CaptureProfile {
+                id: ProfileId::new("exact"),
+                family: CaptureProfileFamily::Native,
+                matches: vec![ProfileMatch {
+                    vendor_id: Some(1),
+                    product_id: Some(2),
+                    transport: Some(Transport::Usb),
+                }],
+            }],
+            ProfileId::new("sdl-joystick"),
+        );
+        assert!(
+            detector
+                .detect(&device(1, 2))
+                .candidates
+                .iter()
+                .all(|candidate| candidate.confidence != DetectionConfidence::Verified)
         );
     }
 }

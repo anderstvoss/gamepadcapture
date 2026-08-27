@@ -27,6 +27,12 @@ The SDL fallback is currently a **selection contract**, not an implemented SDL
 backend. The existing runtime backend is Linux evdev; SDL Joystick integration
 is a planned, separately feature-gated phase.
 
+When a caller forces a capture profile, the assignment retains the complete
+automatic profile selection (including candidates and evidence). A forced
+choice is therefore inspectable policy, not a replacement for the native
+evidence or an assertion of capability parity. Requested virtual-output
+profiles remain independent opaque policy for a later manager.
+
 ## Boundary
 
 ```text

@@ -105,6 +105,10 @@ automatic candidates and native evidence for diagnostics. A forced profile may
 be incompatible; it is an instruction to attempt that mechanical interpretation,
 not a guarantee of correctness.
 
+Passive identity and transport matching may produce `Tentative` or `Strong`
+confidence, but never `Verified`. `Verified` is reserved for an explicitly
+recorded, sanitized physical test with a committed regression fixture.
+
 ### Capture profile versus output profile
 
 ```text
