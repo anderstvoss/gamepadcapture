@@ -119,4 +119,26 @@ mod tests {
         assert!(state.sources().is_empty());
         assert!(state.values().is_empty());
     }
+
+    #[test]
+    fn state_keeps_source_errors_without_discarding_other_evidence() {
+        let device = device();
+        let source = device.source_id.clone();
+        let mut state = TesterState::default();
+        state.apply(CaptureEvent::Connected {
+            device,
+            access: CaptureAccess::SharedFallback,
+        });
+        state.apply(CaptureEvent::SourceError {
+            source_id: source.clone(),
+            error: crate::CaptureError::new(crate::CaptureErrorKind::Read, "fixture failure"),
+        });
+        assert!(state.sources().contains_key(&source));
+        assert!(
+            state
+                .log()
+                .iter()
+                .any(|entry| entry.contains("fixture failure"))
+        );
+    }
 }
