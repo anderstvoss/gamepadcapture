@@ -96,6 +96,14 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+The profile-selection invariant can additionally be fuzzed on Unix with a
+nightly Rust toolchain:
+
+```bash
+cargo install cargo-fuzz --locked
+cargo fuzz run profile_selection --fuzz-dir fuzz -- -max_total_time=60
+```
+
 Linux hardware validation should additionally cover two identical serial-less
 controllers, Bluetooth reconnects, compound controller interfaces, hot-unplug
 during input, exclusive-grab contention, and an evdev ring-buffer overrun.

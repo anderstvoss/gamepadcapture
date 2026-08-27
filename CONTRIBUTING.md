@@ -26,6 +26,19 @@ pushing.
    keys, environment files, or hard-coded local paths.
 5. Ensure all CI checks pass before requesting review.
 
+## Review policy
+
+This is currently a single-maintainer project. Every change reaches `main`
+through a pull request with required CI checks and resolved conversations; the
+author performs the pull-request checklist as a recorded self-review. The
+repository does not claim independent-review coverage while it has no second
+maintainer. When an independent maintainer joins, branch protection will be
+changed to require an approving review (and CODEOWNERS where appropriate).
+
+Do not bypass required checks, force-push, or delete `main`. Security-sensitive
+changes should receive an additional review whenever a qualified reviewer is
+available.
+
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
 not through public issues. By contributing, you agree that your contributions
 are licensed under [AGPL-3.0-only](LICENSE).

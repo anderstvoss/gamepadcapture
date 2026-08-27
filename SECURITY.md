@@ -5,6 +5,14 @@
 Security fixes are provided for the latest commit on `main` until a release
 support policy is published.
 
+## Maintenance expectations
+
+The maintainer reviews new issues and pull requests on a best-effort basis and
+aims to acknowledge security reports within seven days. The project is early
+stage software: no compatibility or response-time guarantee exists yet, and
+unmaintained areas are documented as such rather than represented as supported.
+Release support expectations will be published before the first stable release.
+
 ## Reporting a vulnerability
 
 Do not open public issues for suspected vulnerabilities.
