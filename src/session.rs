@@ -122,6 +122,18 @@ impl<P: CaptureProvider> CaptureSession<P> {
             }
         }
 
+        output.extend(self.poll_active());
+        Ok(output)
+    }
+
+    /// Collect batches from already-open sources without rescanning host devices.
+    ///
+    /// Use [`Self::poll`] regularly when hotplug reconciliation is required. This
+    /// method is useful for a tight capture loop after an initial discovery,
+    /// because it avoids reopening and inspecting every evdev node per frame.
+    #[must_use]
+    pub fn poll_active(&mut self) -> Vec<CaptureEvent> {
+        let mut output = Vec::new();
         for (source_id, active) in &mut self.active {
             match active.source.read_batches() {
                 Ok(batches) => output.extend(batches.into_iter().map(CaptureEvent::Input)),
@@ -131,7 +143,7 @@ impl<P: CaptureProvider> CaptureSession<P> {
                 }),
             }
         }
-        Ok(output)
+        output
     }
 
     #[must_use]
@@ -249,6 +261,23 @@ mod tests {
             CaptureEvent::Disconnected { source_id, .. } if source_id == &pad.source_id
         ));
         assert!(session.poll().unwrap().is_empty());
+    }
+
+    #[test]
+    fn active_poll_does_not_rescan_or_disconnect_an_open_source() {
+        let pad = device();
+        let provider = FakeProvider {
+            scans: VecDeque::from([vec![pad]]),
+            fail_open: false,
+            access: CaptureAccess::Shared,
+        };
+        let mut session = CaptureSession::new(provider, AccessMode::Shared);
+        assert!(matches!(
+            session.poll().unwrap().as_slice(),
+            [CaptureEvent::Connected { .. }]
+        ));
+        assert!(session.poll_active().is_empty());
+        assert_eq!(session.connected_devices().len(), 1);
     }
 
     #[test]

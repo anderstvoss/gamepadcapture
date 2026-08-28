@@ -96,8 +96,13 @@ fn live_recording(polls: usize, observations: Vec<String>) -> Result<FixtureReco
         .collect::<BTreeMap<SourceId, usize>>();
     let mut session = CaptureSession::new(provider, gamepad_capture::AccessMode::Shared);
     let mut batches = Vec::new();
-    for _ in 0..polls {
-        for event in session.poll().map_err(|error| error.to_string())? {
+    for event in session.poll().map_err(|error| error.to_string())? {
+        if let CaptureEvent::Input(batch) = event {
+            batches.push(batch);
+        }
+    }
+    for _ in 1..polls {
+        for event in session.poll_active() {
             if let CaptureEvent::Input(batch) = event {
                 batches.push(batch);
             }
