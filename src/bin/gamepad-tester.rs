@@ -8,7 +8,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc::{self, TrySendError},
     },
     thread,
     time::{Duration, Instant},
@@ -25,10 +25,28 @@ use gamepad_capture::{
     IdentityStability, NativeEvent, PhysicalDeviceId, ProfileId, SourceId, Transport,
 };
 
+const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(8);
+const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(16);
+const MAX_EVENTS_PER_UPDATE: usize = 512;
+const MAX_PENDING_CAPTURE_EVENTS: usize = 512;
+const MAX_RENDERED_FRAMES: usize = 64;
+const MAX_RENDERED_LOG_ENTRIES: usize = 128;
+
 fn main() -> eframe::Result {
     eframe::run_native(
         "Gamepad Capture Tester",
-        eframe::NativeOptions::default(),
+        eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([1100.0, 760.0])
+                .with_min_inner_size([760.0, 520.0]),
+            // This passive diagnostics window has no animation. Keep the compositor
+            // paced instead of continuously submitting frames while idle.
+            vsync: true,
+            // A standalone tester does not need eframe's run-on-demand event-loop
+            // compatibility mode. The normal loop has a simpler shutdown path.
+            run_and_return: false,
+            ..Default::default()
+        },
         Box::new(|_| Ok(Box::<TesterApp>::default())),
     )
 }
@@ -60,11 +78,13 @@ enum AccessChoice {
 
 impl eframe::App for TesterApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        self.drain_events();
+        let more_events_ready = self.drain_events();
         Self::render_toolbar(ctx);
         self.render_sources(ctx);
         self.render_evidence(ctx);
-        ctx.request_repaint_after(Duration::from_millis(16));
+        if more_events_ready {
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -375,11 +395,11 @@ fn axis_marker(value: i32, minimum: i32, maximum: i32) -> f32 {
 
 fn render_frames(ui: &mut egui::Ui, state: &TesterState) {
     ui.separator();
-    ui.heading("Complete raw event frames");
+    ui.heading("Newest complete raw event frames (up to 64 shown)");
     egui::ScrollArea::vertical()
         .max_height(180.0)
         .show(ui, |ui| {
-            for frame in state.frames().iter().rev() {
+            for frame in state.frames().iter().rev().take(MAX_RENDERED_FRAMES) {
                 ui.monospace(format!("{} frame {}", frame.source_id, frame.sequence));
                 for event in &frame.events {
                     ui.monospace(format!(
@@ -393,12 +413,12 @@ fn render_frames(ui: &mut egui::Ui, state: &TesterState) {
 
 fn render_lifecycle(ui: &mut egui::Ui, state: &TesterState) {
     ui.separator();
-    ui.heading("Lifecycle and errors");
+    ui.heading("Newest lifecycle and errors (up to 128 shown)");
     if state.log().is_empty() {
         ui.weak("No events yet. Use a synthetic replay frame or explicitly start live capture.");
     } else {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for event in state.log() {
+            for event in state.log().iter().rev().take(MAX_RENDERED_LOG_ENTRIES) {
                 ui.monospace(event);
             }
         });
@@ -434,12 +454,16 @@ fn render_hid(ui: &mut egui::Ui, state: &TesterState) {
 }
 
 impl TesterApp {
-    fn drain_events(&mut self) {
+    fn drain_events(&mut self) -> bool {
         if let Some(receiver) = &self.receiver {
-            while let Ok(event) = receiver.try_recv() {
+            for _ in 0..MAX_EVENTS_PER_UPDATE {
+                let Ok(event) = receiver.try_recv() else {
+                    return false;
+                };
                 self.state.apply(event);
             }
         }
+        self.receiver.is_some()
     }
 
     fn render_toolbar(ctx: &egui::Context) {
@@ -460,7 +484,7 @@ impl TesterApp {
             );
             ui.radio_value(&mut self.access, AccessChoice::Exclusive, "Exclusive");
             if ui.button("Start live evdev capture").clicked() {
-                self.start_live_capture();
+                self.start_live_capture(ctx.clone());
             }
             if ui.button("Show synthetic replay frame").clicked() {
                 self.synthetic_frame();
@@ -565,9 +589,9 @@ impl TesterApp {
         }
     }
 
-    fn start_live_capture(&mut self) {
+    fn start_live_capture(&mut self, repaint: egui::Context) {
         self.stop_capture();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_CAPTURE_EVENTS);
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let mode = self.access_mode();
@@ -575,8 +599,29 @@ impl TesterApp {
             let mut session =
                 CaptureSession::new(gamepad_capture::linux::EvdevProvider::new(), mode);
             let mut next_discovery = Instant::now();
+            let mut next_repaint = Instant::now();
+            let mut dropped_display_events = 0_usize;
             while !thread_stop.load(Ordering::Relaxed) {
                 let now = Instant::now();
+                let mut sent_event = false;
+                if dropped_display_events > 0 {
+                    match sender.try_send(CaptureEvent::SourceError {
+                        source_id: SourceId::new("tester-display-queue"),
+                        error: gamepad_capture::CaptureError::new(
+                            gamepad_capture::CaptureErrorKind::Read,
+                            format!(
+                                "tester display queue omitted {dropped_display_events} complete event(s)"
+                            ),
+                        ),
+                    }) {
+                        Ok(()) => {
+                            dropped_display_events = 0;
+                            sent_event = true;
+                        }
+                        Err(TrySendError::Full(_)) => {}
+                        Err(TrySendError::Disconnected(_)) => return,
+                    }
+                }
                 let events = if now >= next_discovery {
                     next_discovery = now + Duration::from_millis(500);
                     session.poll()
@@ -586,19 +631,28 @@ impl TesterApp {
                 match events {
                     Ok(events) => {
                         for event in events {
-                            if sender.send(event).is_err() {
-                                return;
+                            match sender.try_send(event) {
+                                Ok(()) => sent_event = true,
+                                Err(TrySendError::Full(_)) => {
+                                    dropped_display_events =
+                                        dropped_display_events.saturating_add(1);
+                                }
+                                Err(TrySendError::Disconnected(_)) => return,
                             }
+                        }
+                        if sent_event && now >= next_repaint {
+                            repaint.request_repaint();
+                            next_repaint = now + UI_REPAINT_INTERVAL;
                         }
                     }
                     Err(error) => {
-                        let _ = sender.send(CaptureEvent::SourceError {
+                        let _ = sender.try_send(CaptureEvent::SourceError {
                             source_id: SourceId::new("discovery"),
                             error,
                         });
                     }
                 }
-                thread::sleep(Duration::from_millis(4));
+                thread::sleep(CAPTURE_POLL_INTERVAL);
             }
         });
         self.receiver = Some(receiver);

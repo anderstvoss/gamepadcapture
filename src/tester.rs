@@ -8,6 +8,9 @@ use crate::{
     ProfileSelectionMode, SourceId,
 };
 
+const MAX_RETAINED_FRAMES: usize = 256;
+const MAX_RETAINED_LOG_ENTRIES: usize = 512;
+
 /// Pure HID fixture evidence rendered beside native evdev evidence.
 #[derive(Debug, Clone)]
 pub struct TesterHidEvidence {
@@ -101,8 +104,7 @@ impl TesterState {
         match event {
             CaptureEvent::Connected { device, access } => {
                 let source_id = device.source_id.clone();
-                self.log
-                    .push(format!("connected {} ({access:?})", device.source_id));
+                self.push_log(format!("connected {} ({access:?})", device.source_id));
                 let profile = AutoProfileDetector::new(Vec::new(), ProfileId::new("sdl-joystick"))
                     .detect(&device);
                 self.sources.insert(
@@ -124,9 +126,8 @@ impl TesterState {
                         event.value,
                     );
                 }
-                self.log
-                    .push(format!("frame {} from {}", batch.sequence, batch.source_id));
-                self.frames.push(batch);
+                self.push_log(format!("frame {} from {}", batch.sequence, batch.source_id));
+                self.push_frame(batch);
             }
             CaptureEvent::Disconnected { source_id, .. } => {
                 self.sources.remove(&source_id);
@@ -134,12 +135,12 @@ impl TesterState {
                 if self.selected_source.as_ref() == Some(&source_id) {
                     self.selected_source = self.sources.keys().next().cloned();
                 }
-                self.log.push(format!("disconnected {source_id}"));
+                self.push_log(format!("disconnected {source_id}"));
             }
             CaptureEvent::SourceError { source_id, error } => {
-                self.log.push(format!("source error {source_id}: {error}"));
+                self.push_log(format!("source error {source_id}: {error}"));
             }
-            CaptureEvent::DiscoveryError(issue) => self.log.push(format!(
+            CaptureEvent::DiscoveryError(issue) => self.push_log(format!(
                 "discovery error {}: {}",
                 issue.device_path.display(),
                 issue.error
@@ -163,6 +164,20 @@ impl TesterState {
     #[must_use]
     pub fn log(&self) -> &[String] {
         &self.log
+    }
+
+    fn push_frame(&mut self, frame: EventBatch) {
+        if self.frames.len() == MAX_RETAINED_FRAMES {
+            self.frames.remove(0);
+        }
+        self.frames.push(frame);
+    }
+
+    fn push_log(&mut self, entry: String) {
+        if self.log.len() == MAX_RETAINED_LOG_ENTRIES {
+            self.log.remove(0);
+        }
+        self.log.push(entry);
     }
 
     /// Select an active source for visual inspection.
@@ -295,7 +310,7 @@ impl TesterState {
         let descriptor = match HidDescriptor::parse(&fixture.descriptor) {
             Ok(descriptor) => descriptor,
             Err(error) => {
-                self.log.push(format!("HID descriptor error: {error}"));
+                self.push_log(format!("HID descriptor error: {error}"));
                 return Err(error);
             }
         };
@@ -311,7 +326,7 @@ impl TesterState {
             reports: fixture.reports.clone(),
             diagnostics,
         });
-        self.log.push("applied synthetic HID fixture".to_owned());
+        self.push_log("applied synthetic HID fixture".to_owned());
         Ok(())
     }
 
@@ -325,8 +340,7 @@ impl TesterState {
         if let Some(source) = self.sources.get_mut(source_id) {
             let automatic = source.profile.automatic().clone();
             source.profile = automatic.force(profile_id);
-            self.log
-                .push(format!("forced profile preview for {source_id}"));
+            self.push_log(format!("forced profile preview for {source_id}"));
         }
     }
 
@@ -334,8 +348,7 @@ impl TesterState {
     pub fn clear_forced_profile(&mut self, source_id: &SourceId) {
         if let Some(source) = self.sources.get_mut(source_id) {
             source.profile = ProfileSelectionMode::Auto(source.profile.automatic().clone());
-            self.log
-                .push(format!("cleared forced profile preview for {source_id}"));
+            self.push_log(format!("cleared forced profile preview for {source_id}"));
         }
     }
 }
@@ -525,6 +538,49 @@ mod tests {
                 .iter()
                 .any(|entry| entry.contains("fixture failure"))
         );
+    }
+
+    #[test]
+    fn state_retains_bounded_recent_frames_and_log_entries() {
+        let device = device();
+        let source = device.source_id.clone();
+        let mut state = TesterState::default();
+        state.apply(CaptureEvent::Connected {
+            device,
+            access: CaptureAccess::Shared,
+        });
+        let frame_limit = u64::try_from(MAX_RETAINED_FRAMES).expect("limit fits in u64");
+        for sequence in 0..=frame_limit {
+            state.apply(CaptureEvent::Input(EventBatch {
+                source_id: source.clone(),
+                sequence,
+                events: Vec::new(),
+            }));
+        }
+        assert_eq!(state.frames().len(), MAX_RETAINED_FRAMES);
+        assert_eq!(state.frames().first().map(|frame| frame.sequence), Some(1));
+        assert_eq!(
+            state.frames().last().map(|frame| frame.sequence),
+            Some(frame_limit)
+        );
+
+        for index in 0..=MAX_RETAINED_LOG_ENTRIES {
+            state.apply(CaptureEvent::SourceError {
+                source_id: source.clone(),
+                error: crate::CaptureError::new(crate::CaptureErrorKind::Read, index.to_string()),
+            });
+        }
+        assert_eq!(state.log().len(), MAX_RETAINED_LOG_ENTRIES);
+        assert!(
+            state
+                .log()
+                .first()
+                .is_some_and(|entry| entry.ends_with('1'))
+        );
+        assert!(state
+            .log()
+            .last()
+            .is_some_and(|entry| entry.ends_with(MAX_RETAINED_LOG_ENTRIES.to_string().as_str())));
     }
 
     #[test]
