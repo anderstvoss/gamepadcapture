@@ -124,6 +124,11 @@ cargo run --features tester --bin gamepad-tester
 It is a passive evidence viewer: it does not normalize inputs, create virtual
 controllers, write controller output, or change host permissions.
 
+The tester is event-driven and bounds its display queue and retained history so
+an overloaded diagnostics window reports omitted display events instead of
+consuming unbounded memory. `capture-lab` remains the appropriate tool for a
+bounded recording artifact.
+
 The tester includes a generic native-control dashboard and a clearly labeled
 Xbox-layout display demo. The native dashboard is authoritative; the Xbox
 surface is only a visualization of a matching Linux event-code shape and does
