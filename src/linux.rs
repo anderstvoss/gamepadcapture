@@ -2,9 +2,11 @@
 
 use std::fs;
 use std::io;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::Path;
 
 use evdev::{BusType, Device, EventType};
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 
 use crate::{
     AbsoluteAxisInfo, AccessMode, CaptureAccess, CaptureError, CaptureErrorKind, CaptureProvider,
@@ -92,6 +94,15 @@ impl EventSource for EvdevSource {
     }
 
     fn read_batches(&mut self) -> Result<Vec<EventBatch>, CaptureError> {
+        if !readable_now(self.device.as_fd()).map_err(|error| {
+            io_error(
+                CaptureErrorKind::Read,
+                Path::new(self.source_id.as_str()),
+                &error,
+            )
+        })? {
+            return Ok(Vec::new());
+        }
         let events = match self.device.fetch_events() {
             Ok(events) => events.collect::<Vec<_>>(),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(Vec::new()),
@@ -134,6 +145,18 @@ impl EventSource for EvdevSource {
         }
         Ok(batches)
     }
+}
+
+/// Check readiness before asking evdev to read, so an idle source never stalls a session poll.
+fn readable_now(fd: BorrowedFd<'_>) -> io::Result<bool> {
+    let mut fds = [PollFd::new(fd, PollFlags::POLLIN)];
+    let ready = poll(&mut fds, PollTimeout::ZERO).map_err(io::Error::from)?;
+    if ready == 0 {
+        return Ok(false);
+    }
+    Ok(fds[0].revents().is_some_and(|events| {
+        events.intersects(PollFlags::POLLIN | PollFlags::POLLERR | PollFlags::POLLHUP)
+    }))
 }
 
 fn is_synchronization_lost(event_type: u16, code: u16) -> bool {
@@ -310,6 +333,10 @@ fn io_error(kind: CaptureErrorKind, path: &Path, error: &io::Error) -> CaptureEr
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+
     use super::*;
 
     #[test]
@@ -333,5 +360,13 @@ mod tests {
         assert!(is_synchronization_lost(EventType::SYNCHRONIZATION.0, 3));
         assert!(!is_synchronization_lost(EventType::SYNCHRONIZATION.0, 0));
         assert!(!is_synchronization_lost(3, 3));
+    }
+
+    #[test]
+    fn readiness_gate_returns_without_waiting_for_an_idle_source() {
+        let (mut writer, reader) = UnixStream::pair().unwrap();
+        assert!(!readable_now(reader.as_fd()).unwrap());
+        writer.write_all(&[1]).unwrap();
+        assert!(readable_now(reader.as_fd()).unwrap());
     }
 }

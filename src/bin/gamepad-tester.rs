@@ -11,7 +11,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use eframe::egui;
@@ -318,8 +318,16 @@ impl TesterApp {
         thread::spawn(move || {
             let mut session =
                 CaptureSession::new(gamepad_capture::linux::EvdevProvider::new(), mode);
+            let mut next_discovery = Instant::now();
             while !thread_stop.load(Ordering::Relaxed) {
-                match session.poll() {
+                let now = Instant::now();
+                let events = if now >= next_discovery {
+                    next_discovery = now + Duration::from_millis(500);
+                    session.poll()
+                } else {
+                    Ok(session.poll_active())
+                };
+                match events {
                     Ok(events) => {
                         for event in events {
                             if sender.send(event).is_err() {
