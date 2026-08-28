@@ -1,0 +1,52 @@
+{
+  "manifest": {
+    "format_version": 1,
+    "synthetic": true,
+    "sources": [
+      {
+        "reported_name": "Synthetic Xbox-shaped USB controller",
+        "bus_type": 3,
+        "vendor_id": 65535,
+        "product_id": 2,
+        "version": 1,
+        "transport": "Usb",
+        "control_count": 12
+      }
+    ]
+  },
+  "controls": [
+    { "source_index": 0, "event_type": 1, "code": 304, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 305, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 307, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 308, "absolute_range": null },
+    { "source_index": 0, "event_type": 3, "code": 0, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 0, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 1, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 0, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 3, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 0, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 4, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 0, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 16, "absolute_range": { "minimum": -1, "maximum": 1, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 17, "absolute_range": { "minimum": -1, "maximum": 1, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 2, "absolute_range": { "minimum": 0, "maximum": 1023, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 5, "absolute_range": { "minimum": 0, "maximum": 1023, "fuzz": 0, "flat": 0, "resolution": 0 } }
+  ],
+  "frames": [
+    { "source_index": 0, "sequence": 1, "events": [
+      { "timestamp_micros": 0, "event_type": 1, "code": 304, "value": 1 },
+      { "timestamp_micros": 0, "event_type": 3, "code": 0, "value": -16384 },
+      { "timestamp_micros": 0, "event_type": 3, "code": 1, "value": 8192 }
+    ] },
+    { "source_index": 0, "sequence": 2, "events": [
+      { "timestamp_micros": 1, "event_type": 3, "code": 16, "value": -1 },
+      { "timestamp_micros": 1, "event_type": 3, "code": 17, "value": 1 },
+      { "timestamp_micros": 1, "event_type": 3, "code": 2, "value": 777 },
+      { "timestamp_micros": 1, "event_type": 3, "code": 5, "value": 555 }
+    ] }
+  ],
+  "segments": [
+    {
+      "label": "synthetic-display-replay",
+      "first_frame": 0,
+      "frame_count": 2,
+      "operator_observations": ["Synthetic display fixture; not physical validation."]
+    }
+  ]
+}

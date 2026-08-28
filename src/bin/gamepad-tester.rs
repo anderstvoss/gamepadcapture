@@ -16,7 +16,9 @@ use std::{
 
 use eframe::egui;
 use gamepad_capture::hid::HidFixture;
-use gamepad_capture::tester::{TesterSource, TesterState};
+use gamepad_capture::tester::{
+    NativeInputView, TesterSource, TesterState, XboxDisplayButton, XboxDisplayView,
+};
 use gamepad_capture::{
     AbsoluteAxisInfo, AccessMode, CaptureAccess, CaptureEvent, CaptureSession, ControlDescriptor,
     ControllerClass, DeviceDescriptor, DeviceIdentity, DeviceProvenance, EventBatch,
@@ -34,9 +36,18 @@ fn main() -> eframe::Result {
 #[derive(Default)]
 struct TesterApp {
     access: AccessChoice,
+    surface: VisualizerSurface,
     state: TesterState,
     receiver: Option<mpsc::Receiver<CaptureEvent>>,
     stop: Option<Arc<AtomicBool>>,
+}
+
+#[derive(Default, PartialEq)]
+enum VisualizerSurface {
+    #[default]
+    Native,
+    XboxDemo,
+    Evidence,
 }
 
 #[derive(Default, PartialEq)]
@@ -153,6 +164,208 @@ fn render_axis_values(ui: &mut egui::Ui, state: &TesterState) {
     }
 }
 
+fn render_dpad(ui: &mut egui::Ui, dpad: Option<(i32, i32)>) {
+    let (x, y) = dpad.unwrap_or_default();
+    ui.label("Native D-pad / hat values");
+    egui::Grid::new("native-dpad").show(ui, |ui| {
+        ui.label("");
+        ui.colored_label(
+            if y < 0 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::GRAY
+            },
+            "↑",
+        );
+        ui.end_row();
+        ui.colored_label(
+            if x < 0 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::GRAY
+            },
+            "←",
+        );
+        ui.monospace(format!("{x}, {y}"));
+        ui.colored_label(
+            if x > 0 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::GRAY
+            },
+            "→",
+        );
+        ui.end_row();
+        ui.label("");
+        ui.colored_label(
+            if y > 0 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::GRAY
+            },
+            "↓",
+        );
+        ui.end_row();
+    });
+}
+
+fn render_native_dashboard(ui: &mut egui::Ui, view: Option<NativeInputView>) {
+    ui.heading("Native input dashboard");
+    ui.label("Raw evdev codes and values; this view does not apply a gamepad mapping.");
+    let Some(view) = view else {
+        ui.weak("Select a live or replayed source to inspect native controls.");
+        return;
+    };
+    ui.monospace(format!(
+        "{}; {} complete frame(s)",
+        view.source_id, view.recent_frame_count
+    ));
+    ui.separator();
+    ui.label("Keys");
+    ui.horizontal_wrapped(|ui| {
+        for key in &view.keys {
+            let color = if key.value != 0 {
+                egui::Color32::LIGHT_GREEN
+            } else {
+                egui::Color32::DARK_GRAY
+            };
+            ui.colored_label(
+                color,
+                format!("{} ({:#06x}) = {}", key.name, key.code, key.value),
+            );
+        }
+    });
+    ui.separator();
+    render_dpad(ui, view.dpad);
+    ui.separator();
+    ui.label("Absolute axes");
+    for axis in &view.axes {
+        ui.monospace(format!(
+            "{} ({:#06x}): {}  range {}..={}",
+            axis.name, axis.code, axis.value, axis.info.minimum, axis.info.maximum
+        ));
+        ui.add(
+            egui::ProgressBar::new(axis_marker(
+                axis.value,
+                axis.info.minimum,
+                axis.info.maximum,
+            ))
+            .text("raw display marker"),
+        );
+    }
+}
+
+fn xbox_button_label(button: XboxDisplayButton) -> &'static str {
+    match button {
+        XboxDisplayButton::South => "A",
+        XboxDisplayButton::East => "B",
+        XboxDisplayButton::North => "Y",
+        XboxDisplayButton::West => "X",
+        XboxDisplayButton::LeftBumper => "LB",
+        XboxDisplayButton::RightBumper => "RB",
+        XboxDisplayButton::View => "View",
+        XboxDisplayButton::Menu => "Menu",
+        XboxDisplayButton::Guide => "Guide",
+        XboxDisplayButton::LeftStick => "LS",
+        XboxDisplayButton::RightStick => "RS",
+    }
+}
+
+fn render_xbox_button(ui: &mut egui::Ui, button: XboxDisplayButton, value: i32) {
+    let color = if value != 0 {
+        egui::Color32::LIGHT_GREEN
+    } else {
+        egui::Color32::DARK_GRAY
+    };
+    ui.colored_label(color, format!("[{}]", xbox_button_label(button)));
+}
+
+fn render_xbox_demo(ui: &mut egui::Ui, view: Option<XboxDisplayView>) {
+    ui.heading("Xbox-layout display demo");
+    ui.label(
+        "Presentation-only view from a compatible Linux code shape — not a profile or decoder.",
+    );
+    let Some(view) = view else {
+        ui.weak("The selected source does not expose the required Xbox-compatible code shape.");
+        return;
+    };
+    let value = |button| {
+        view.buttons
+            .iter()
+            .find(|(known, _)| *known == button)
+            .map_or(0, |(_, value)| *value)
+    };
+    ui.horizontal(|ui| {
+        render_xbox_button(
+            ui,
+            XboxDisplayButton::LeftBumper,
+            value(XboxDisplayButton::LeftBumper),
+        );
+        ui.add_space(120.0);
+        render_xbox_button(
+            ui,
+            XboxDisplayButton::RightBumper,
+            value(XboxDisplayButton::RightBumper),
+        );
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            render_dpad(ui, Some(view.dpad));
+            ui.monospace(format!(
+                "LS raw: {}, {}",
+                view.left_stick.0, view.left_stick.1
+            ));
+            render_xbox_button(
+                ui,
+                XboxDisplayButton::LeftStick,
+                value(XboxDisplayButton::LeftStick),
+            );
+        });
+        ui.add_space(24.0);
+        ui.vertical(|ui| {
+            render_xbox_button(ui, XboxDisplayButton::View, value(XboxDisplayButton::View));
+            render_xbox_button(
+                ui,
+                XboxDisplayButton::Guide,
+                value(XboxDisplayButton::Guide),
+            );
+            render_xbox_button(ui, XboxDisplayButton::Menu, value(XboxDisplayButton::Menu));
+        });
+        ui.add_space(24.0);
+        ui.vertical(|ui| {
+            render_xbox_button(
+                ui,
+                XboxDisplayButton::North,
+                value(XboxDisplayButton::North),
+            );
+            ui.horizontal(|ui| {
+                render_xbox_button(ui, XboxDisplayButton::West, value(XboxDisplayButton::West));
+                render_xbox_button(ui, XboxDisplayButton::East, value(XboxDisplayButton::East));
+            });
+            render_xbox_button(
+                ui,
+                XboxDisplayButton::South,
+                value(XboxDisplayButton::South),
+            );
+            ui.monospace(format!(
+                "RS raw: {}, {}",
+                view.right_stick.0, view.right_stick.1
+            ));
+            render_xbox_button(
+                ui,
+                XboxDisplayButton::RightStick,
+                value(XboxDisplayButton::RightStick),
+            );
+        });
+    });
+    ui.separator();
+    ui.monospace(format!(
+        "LT raw: {:?}; RT raw: {:?}",
+        view.left_trigger, view.right_trigger
+    ));
+}
+
 /// This lossy ratio is exclusively for drawing a progress bar; stored values stay native `i32`s.
 #[allow(clippy::cast_precision_loss)]
 fn axis_marker(value: i32, minimum: i32, maximum: i32) -> f32 {
@@ -259,6 +472,35 @@ impl TesterApp {
                 self.stop_capture();
             }
             ui.separator();
+            ui.heading("Visualizer");
+            ui.radio_value(
+                &mut self.surface,
+                VisualizerSurface::Native,
+                "Native dashboard",
+            );
+            ui.radio_value(
+                &mut self.surface,
+                VisualizerSurface::XboxDemo,
+                "Xbox display demo",
+            );
+            ui.radio_value(&mut self.surface, VisualizerSurface::Evidence, "Evidence");
+            let selected = self.state.selected_source().cloned();
+            let mut choice = selected.clone();
+            egui::ComboBox::from_label("Visualized source")
+                .selected_text(selected.as_ref().map_or("None", SourceId::as_str))
+                .show_ui(ui, |ui| {
+                    for source_id in self.state.sources().keys() {
+                        ui.selectable_value(
+                            &mut choice,
+                            Some(source_id.clone()),
+                            source_id.as_str(),
+                        );
+                    }
+                });
+            if choice != selected {
+                self.state.select_source(choice);
+            }
+            ui.separator();
             ui.heading("Sources");
             if self.state.sources().is_empty() {
                 ui.label("No active source");
@@ -276,29 +518,43 @@ impl TesterApp {
     }
 
     fn render_evidence(&self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Native event frames and values");
-            ui.label("Values are raw `(event_type, code) -> value` evidence; no gamepad mapping is applied.");
-            ui.separator();
-            egui::Grid::new("raw-values").striped(true).show(ui, |ui| {
-                ui.label("Source");
-                ui.label("Type");
-                ui.label("Code");
-                ui.label("Value");
-                ui.end_row();
-                for ((source, event_type, code), value) in self.state.values() {
-                    ui.monospace(source.as_str());
-                    ui.monospace(format!("{event_type:#06x}"));
-                    ui.monospace(format!("{code:#06x}"));
-                    ui.monospace(value.to_string());
-                    ui.end_row();
-                }
-            });
-            render_axis_values(ui, &self.state);
-            render_frames(ui, &self.state);
-            render_hid(ui, &self.state);
-            render_lifecycle(ui, &self.state);
+        egui::CentralPanel::default().show(ctx, |ui| match self.surface {
+            VisualizerSurface::Native => {
+                render_native_dashboard(ui, self.state.native_input_view());
+            }
+            VisualizerSurface::XboxDemo => {
+                render_xbox_demo(ui, self.state.xbox_display_view());
+            }
+            VisualizerSurface::Evidence => {
+                self.render_raw_evidence(ui);
+            }
         });
+    }
+
+    fn render_raw_evidence(&self, ui: &mut egui::Ui) {
+        ui.heading("Native event frames and values");
+        ui.label(
+            "Values are raw `(event_type, code) -> value` evidence; no gamepad mapping is applied.",
+        );
+        ui.separator();
+        egui::Grid::new("raw-values").striped(true).show(ui, |ui| {
+            ui.label("Source");
+            ui.label("Type");
+            ui.label("Code");
+            ui.label("Value");
+            ui.end_row();
+            for ((source, event_type, code), value) in self.state.values() {
+                ui.monospace(source.as_str());
+                ui.monospace(format!("{event_type:#06x}"));
+                ui.monospace(format!("{code:#06x}"));
+                ui.monospace(value.to_string());
+                ui.end_row();
+            }
+        });
+        render_axis_values(ui, &self.state);
+        render_frames(ui, &self.state);
+        render_hid(ui, &self.state);
+        render_lifecycle(ui, &self.state);
     }
 
     fn access_mode(&self) -> AccessMode {

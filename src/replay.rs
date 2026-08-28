@@ -190,6 +190,15 @@ impl FixtureRecording {
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+
+    /// Parse a versioned sanitized recording bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns JSON or schema errors from `serde_json`.
+    pub fn from_json(input: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(input)
+    }
 }
 
 /// One control advertised by a source, represented without a local label.

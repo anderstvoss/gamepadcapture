@@ -21,3 +21,6 @@ parsed by the integration test suite.
 opaque report fixture. It contains only fixture-local endpoint indices and
 opaque numeric evidence tokens; it must never acquire paths, serials,
 Bluetooth addresses, or source IDs.
+
+`synthetic-xbox-display.json` drives the display-only Xbox-shaped tester demo.
+It is synthetic and must not be used to claim physical controller validation.
