@@ -24,3 +24,9 @@ Bluetooth addresses, or source IDs.
 
 `synthetic-xbox-display.json` drives the display-only Xbox-shaped tester demo.
 It is synthetic and must not be used to claim physical controller validation.
+
+`xbox-series-usb-observed-input.json` is a minimal, sanitized observation from
+one USB capture session. It supports regression tests for native replay and the
+display-only demo, but does not verify a capability, promote a profile, or add
+output behavior. Its timestamps have been removed and it contains no local
+paths, persistent source identifiers, serials, or Bluetooth addresses.
