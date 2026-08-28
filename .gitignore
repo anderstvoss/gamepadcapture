@@ -6,3 +6,4 @@
 *.key
 *.pem
 /artifacts/private/
+/.agents/
