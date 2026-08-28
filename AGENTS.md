@@ -16,6 +16,23 @@ Read these files in order before changing code:
    first-class device profile or output support.
 5. [`tests/fixtures/README.md`](tests/fixtures/README.md) before adding test
    recordings or synthetic fixtures.
+6. [`.agents/project-memory.md`](.agents/project-memory.md), when present, for
+   local milestone context. It supplements the tracked documents above; it is
+   never a source of public API truth.
+
+## Local agent memory
+
+Record progress in `.agents/project-memory.md` after every material milestone:
+goal state, branch/PR, commit, checks, public-contract changes, sanitized
+hardware evidence, and the next blocker or safety boundary. Create the file if
+it does not exist. `.agents/` is deliberately gitignored so this operational
+memory stays local.
+
+Never put paths, serials, Bluetooth addresses, raw private captures, tokens,
+or personal operator observations in local memory. Tracked documentation and
+fixtures remain the reviewable source of truth. When physical-signal work needs
+cross-project context, use `https://github.com/anderstvoss/virtualgamepad` as a
+reference without importing its output or normalization responsibilities here.
 
 ## Current state
 
@@ -27,10 +44,14 @@ Implemented today:
 - Native control metadata and a small, pure profile selector.
 - A nominal SDL Joystick fallback candidate. **SDL is not yet linked or used as
   a runtime backend.**
+- Versioned sanitized evdev replay fixtures, a bounded `capture-lab`, and the
+  feature-gated native `gamepad-tester` visualizer.
+- Experimental pure HID descriptor/report parsing, framing, endpoint pairing,
+  and synthetic replay. **hidraw is not opened or used at runtime.**
 
-Not implemented yet: hidraw/raw report capture, HID descriptors, SDL runtime
-enumeration, protocol-specific decoders, controller output channels, fixture
-replay tooling, Windows, macOS, or IUCM routing.
+Not implemented yet: hidraw/raw report capture, SDL runtime enumeration,
+protocol-specific decoders, controller output channels, Windows, macOS, or
+IUCM routing.
 
 ## Invariants
 
