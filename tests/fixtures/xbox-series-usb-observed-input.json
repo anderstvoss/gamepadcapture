@@ -1,0 +1,65 @@
+{
+  "manifest": {
+    "format_version": 1,
+    "synthetic": false,
+    "sources": [{
+      "reported_name": "Microsoft Xbox Series S|X Controller",
+      "bus_type": 3,
+      "vendor_id": 1118,
+      "product_id": 2834,
+      "version": 1303,
+      "transport": "Usb",
+      "control_count": 26
+    }]
+  },
+  "controls": [
+    { "source_index": 0, "event_type": 1, "code": 167, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 304, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 305, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 307, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 308, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 310, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 311, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 314, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 315, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 316, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 317, "absolute_range": null },
+    { "source_index": 0, "event_type": 1, "code": 318, "absolute_range": null },
+    { "source_index": 0, "event_type": 3, "code": 0, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 16, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 1, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 16, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 2, "absolute_range": { "minimum": 0, "maximum": 1023, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 3, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 16, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 4, "absolute_range": { "minimum": -32768, "maximum": 32767, "fuzz": 16, "flat": 128, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 5, "absolute_range": { "minimum": 0, "maximum": 1023, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 16, "absolute_range": { "minimum": -1, "maximum": 1, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 3, "code": 17, "absolute_range": { "minimum": -1, "maximum": 1, "fuzz": 0, "flat": 0, "resolution": 0 } },
+    { "source_index": 0, "event_type": 21, "code": 80, "absolute_range": null },
+    { "source_index": 0, "event_type": 21, "code": 81, "absolute_range": null },
+    { "source_index": 0, "event_type": 21, "code": 88, "absolute_range": null },
+    { "source_index": 0, "event_type": 21, "code": 89, "absolute_range": null },
+    { "source_index": 0, "event_type": 21, "code": 90, "absolute_range": null },
+    { "source_index": 0, "event_type": 21, "code": 96, "absolute_range": null }
+  ],
+  "frames": [
+    { "source_index": 0, "sequence": 1, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 16, "value": 1 }] },
+    { "source_index": 0, "sequence": 17, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 307, "value": 1 }] },
+    { "source_index": 0, "sequence": 18, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 304, "value": 1 }] },
+    { "source_index": 0, "sequence": 21, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 308, "value": 1 }] },
+    { "source_index": 0, "sequence": 22, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 305, "value": 1 }] },
+    { "source_index": 0, "sequence": 57, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 17, "value": 0 }, { "timestamp_micros": 0, "event_type": 3, "code": 4, "value": 1036 }] },
+    { "source_index": 0, "sequence": 58, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 3, "value": -1272 }, { "timestamp_micros": 0, "event_type": 3, "code": 4, "value": 1907 }] },
+    { "source_index": 0, "sequence": 126, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 0, "value": 660 }, { "timestamp_micros": 0, "event_type": 3, "code": 1, "value": -978 }, { "timestamp_micros": 0, "event_type": 3, "code": 3, "value": -1755 }, { "timestamp_micros": 0, "event_type": 3, "code": 4, "value": 15079 }] },
+    { "source_index": 0, "sequence": 138, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 318, "value": 1 }, { "timestamp_micros": 0, "event_type": 3, "code": 1, "value": 6311 }, { "timestamp_micros": 0, "event_type": 3, "code": 3, "value": -2333 }, { "timestamp_micros": 0, "event_type": 3, "code": 4, "value": -5046 }] },
+    { "source_index": 0, "sequence": 166, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 317, "value": 1 }, { "timestamp_micros": 0, "event_type": 3, "code": 0, "value": 3713 }, { "timestamp_micros": 0, "event_type": 3, "code": 1, "value": 8558 }, { "timestamp_micros": 0, "event_type": 3, "code": 3, "value": -143 }, { "timestamp_micros": 0, "event_type": 3, "code": 4, "value": -721 }] },
+    { "source_index": 0, "sequence": 194, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 2, "value": 66 }] },
+    { "source_index": 0, "sequence": 197, "events": [{ "timestamp_micros": 0, "event_type": 3, "code": 5, "value": 139 }] },
+    { "source_index": 0, "sequence": 201, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 310, "value": 1 }] },
+    { "source_index": 0, "sequence": 202, "events": [{ "timestamp_micros": 0, "event_type": 1, "code": 311, "value": 1 }, { "timestamp_micros": 0, "event_type": 3, "code": 2, "value": 756 }] }
+  ],
+  "segments": [{
+    "label": "usb-observed-input-display",
+    "first_frame": 0,
+    "frame_count": 14,
+    "operator_observations": ["Sanitized physical USB input evidence; timestamps removed; no output commands sent."]
+  }]
+}
