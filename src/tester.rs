@@ -26,6 +26,64 @@ pub struct TesterSource {
     pub profile: ProfileSelectionMode,
 }
 
+/// Native key state suitable for a diagnostic view. `code` remains authoritative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisualKey {
+    pub code: u16,
+    pub name: String,
+    pub value: i32,
+}
+
+/// Native absolute-axis evidence suitable for a diagnostic view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisualAxis {
+    pub code: u16,
+    pub name: String,
+    pub info: crate::AbsoluteAxisInfo,
+    pub value: i32,
+}
+
+/// Generic, source-selected native evidence for the tester dashboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeInputView {
+    pub source_id: SourceId,
+    pub keys: Vec<VisualKey>,
+    pub axes: Vec<VisualAxis>,
+    /// Native `ABS_HAT0X`/`ABS_HAT0Y` values when both axes are advertised.
+    pub dpad: Option<(i32, i32)>,
+    pub recent_frame_count: usize,
+}
+
+/// Display-only Xbox-compatible presentation assembled from observed Linux codes.
+///
+/// This is never a capture profile, decoder, or controller-support claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XboxDisplayView {
+    pub source_id: SourceId,
+    pub buttons: Vec<(XboxDisplayButton, i32)>,
+    pub left_stick: (i32, i32),
+    pub right_stick: (i32, i32),
+    pub dpad: (i32, i32),
+    pub left_trigger: Option<i32>,
+    pub right_trigger: Option<i32>,
+}
+
+/// Labels used only by the Xbox display demo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum XboxDisplayButton {
+    South,
+    East,
+    North,
+    West,
+    LeftBumper,
+    RightBumper,
+    View,
+    Menu,
+    Guide,
+    LeftStick,
+    RightStick,
+}
+
 /// Native values and lifecycle state rendered by the tester.
 #[derive(Debug, Default)]
 pub struct TesterState {
@@ -34,6 +92,7 @@ pub struct TesterState {
     frames: Vec<EventBatch>,
     hid: Option<TesterHidEvidence>,
     log: Vec<String>,
+    selected_source: Option<SourceId>,
 }
 
 impl TesterState {
@@ -41,6 +100,7 @@ impl TesterState {
     pub fn apply(&mut self, event: CaptureEvent) {
         match event {
             CaptureEvent::Connected { device, access } => {
+                let source_id = device.source_id.clone();
                 self.log
                     .push(format!("connected {} ({access:?})", device.source_id));
                 let profile = AutoProfileDetector::new(Vec::new(), ProfileId::new("sdl-joystick"))
@@ -53,6 +113,9 @@ impl TesterState {
                         profile: ProfileSelectionMode::Auto(profile),
                     },
                 );
+                if self.selected_source.is_none() {
+                    self.selected_source = Some(source_id);
+                }
             }
             CaptureEvent::Input(batch) => {
                 for event in &batch.events {
@@ -68,6 +131,9 @@ impl TesterState {
             CaptureEvent::Disconnected { source_id, .. } => {
                 self.sources.remove(&source_id);
                 self.values.retain(|(known, _, _), _| known != &source_id);
+                if self.selected_source.as_ref() == Some(&source_id) {
+                    self.selected_source = self.sources.keys().next().cloned();
+                }
                 self.log.push(format!("disconnected {source_id}"));
             }
             CaptureEvent::SourceError { source_id, error } => {
@@ -97,6 +163,124 @@ impl TesterState {
     #[must_use]
     pub fn log(&self) -> &[String] {
         &self.log
+    }
+
+    /// Select an active source for visual inspection.
+    pub fn select_source(&mut self, source_id: Option<SourceId>) {
+        self.selected_source = source_id.filter(|id| self.sources.contains_key(id));
+    }
+
+    #[must_use]
+    pub fn selected_source(&self) -> Option<&SourceId> {
+        self.selected_source.as_ref()
+    }
+
+    /// Build a generic native-input view without changing the captured evidence.
+    #[must_use]
+    pub fn native_input_view(&self) -> Option<NativeInputView> {
+        let source_id = self.selected_source.as_ref()?;
+        let source = self.sources.get(source_id)?;
+        let value = |event_type, code, fallback| {
+            self.values
+                .get(&(source_id.clone(), event_type, code))
+                .copied()
+                .unwrap_or(fallback)
+        };
+        let keys = source
+            .device
+            .controls
+            .iter()
+            .filter_map(|control| match control {
+                crate::ControlDescriptor::Key { code, name } => Some(VisualKey {
+                    code: *code,
+                    name: name.clone(),
+                    value: value(1, *code, 0),
+                }),
+                _ => None,
+            })
+            .collect();
+        let axes = source
+            .device
+            .controls
+            .iter()
+            .filter_map(|control| match control {
+                crate::ControlDescriptor::AbsoluteAxis { code, name, info } => Some(VisualAxis {
+                    code: *code,
+                    name: name.clone(),
+                    info: info.clone(),
+                    value: value(3, *code, info.current),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let axis_value = |code| {
+            axes.iter()
+                .find(|axis| axis.code == code)
+                .map(|axis| axis.value)
+        };
+        Some(NativeInputView {
+            source_id: source_id.clone(),
+            keys,
+            dpad: axis_value(0x10).zip(axis_value(0x11)),
+            axes,
+            recent_frame_count: self
+                .frames
+                .iter()
+                .filter(|frame| frame.source_id == *source_id)
+                .count(),
+        })
+    }
+
+    /// Build an Xbox-shaped display demo only for a matching Linux control shape.
+    #[must_use]
+    pub fn xbox_display_view(&self) -> Option<XboxDisplayView> {
+        let view = self.native_input_view()?;
+        let has_key = |code| view.keys.iter().any(|key| key.code == code);
+        let has_axis = |code| view.axes.iter().any(|axis| axis.code == code);
+        if ![304, 305, 307, 308].into_iter().all(has_key)
+            || ![0, 1, 3, 4, 0x10, 0x11].into_iter().all(has_axis)
+        {
+            return None;
+        }
+        let key_value = |code| {
+            view.keys
+                .iter()
+                .find(|key| key.code == code)
+                .map_or(0, |key| key.value)
+        };
+        let axis_value = |code| {
+            view.axes
+                .iter()
+                .find(|axis| axis.code == code)
+                .map_or(0, |axis| axis.value)
+        };
+        let optional_axis = |code| {
+            view.axes
+                .iter()
+                .find(|axis| axis.code == code)
+                .map(|axis| axis.value)
+        };
+        Some(XboxDisplayView {
+            source_id: view.source_id,
+            buttons: vec![
+                (XboxDisplayButton::South, key_value(304)),
+                (XboxDisplayButton::East, key_value(305)),
+                (XboxDisplayButton::North, key_value(307)),
+                (XboxDisplayButton::West, key_value(308)),
+                (XboxDisplayButton::LeftBumper, key_value(310)),
+                (XboxDisplayButton::RightBumper, key_value(311)),
+                (XboxDisplayButton::View, key_value(314)),
+                (XboxDisplayButton::Menu, key_value(315)),
+                (XboxDisplayButton::Guide, key_value(316)),
+                (XboxDisplayButton::LeftStick, key_value(317)),
+                (XboxDisplayButton::RightStick, key_value(318)),
+            ],
+            left_stick: (axis_value(0), axis_value(1)),
+            right_stick: (axis_value(3), axis_value(4)),
+            dpad: (axis_value(0x10), axis_value(0x11)),
+            left_trigger: optional_axis(2),
+            right_trigger: optional_axis(5),
+        })
     }
 
     /// Apply a sanitized HID fixture without opening a hidraw device.
@@ -191,6 +375,32 @@ mod tests {
         }
     }
 
+    fn xbox_device() -> DeviceDescriptor {
+        let mut device = device();
+        device.controls = [304, 305, 307, 308]
+            .into_iter()
+            .map(|code| crate::ControlDescriptor::Key {
+                code,
+                name: format!("key-{code}"),
+            })
+            .chain([0, 1, 3, 4, 0x10, 0x11, 2, 5].into_iter().map(|code| {
+                crate::ControlDescriptor::AbsoluteAxis {
+                    code,
+                    name: format!("axis-{code}"),
+                    info: crate::AbsoluteAxisInfo {
+                        minimum: if code >= 0x10 { -1 } else { -32_768 },
+                        maximum: if code >= 0x10 { 1 } else { 32_767 },
+                        current: 0,
+                        fuzz: 0,
+                        flat: 0,
+                        resolution: 0,
+                    },
+                }
+            }))
+            .collect();
+        device
+    }
+
     #[test]
     fn state_keeps_raw_values_and_clears_them_on_disconnect() {
         let device = device();
@@ -218,6 +428,81 @@ mod tests {
         });
         assert!(state.sources().is_empty());
         assert!(state.values().is_empty());
+    }
+
+    #[test]
+    fn native_view_tracks_raw_values_and_selected_source() {
+        let device = xbox_device();
+        let source = device.source_id.clone();
+        let mut state = TesterState::default();
+        state.apply(CaptureEvent::Connected {
+            device,
+            access: CaptureAccess::Shared,
+        });
+        state.apply(CaptureEvent::Input(EventBatch {
+            source_id: source.clone(),
+            sequence: 1,
+            events: vec![
+                NativeEvent {
+                    timestamp: SystemTime::UNIX_EPOCH,
+                    event_type: 1,
+                    code: 304,
+                    value: 1,
+                },
+                NativeEvent {
+                    timestamp: SystemTime::UNIX_EPOCH,
+                    event_type: 3,
+                    code: 0x10,
+                    value: -1,
+                },
+                NativeEvent {
+                    timestamp: SystemTime::UNIX_EPOCH,
+                    event_type: 3,
+                    code: 0x11,
+                    value: 1,
+                },
+            ],
+        }));
+        let view = state.native_input_view().unwrap();
+        assert_eq!(view.source_id, source);
+        assert_eq!(
+            view.keys.iter().find(|key| key.code == 304).unwrap().value,
+            1
+        );
+        assert_eq!(view.dpad, Some((-1, 1)));
+        assert_eq!(view.recent_frame_count, 1);
+    }
+
+    #[test]
+    fn xbox_display_is_shape_gated_and_does_not_change_raw_evidence() {
+        let mut state = TesterState::default();
+        state.apply(CaptureEvent::Connected {
+            device: device(),
+            access: CaptureAccess::Shared,
+        });
+        assert!(state.xbox_display_view().is_none());
+        let device = xbox_device();
+        let source = device.source_id.clone();
+        state.apply(CaptureEvent::Connected {
+            device,
+            access: CaptureAccess::Shared,
+        });
+        state.select_source(Some(source.clone()));
+        state.apply(CaptureEvent::Input(EventBatch {
+            source_id: source.clone(),
+            sequence: 2,
+            events: vec![NativeEvent {
+                timestamp: SystemTime::UNIX_EPOCH,
+                event_type: 1,
+                code: 304,
+                value: 1,
+            }],
+        }));
+        let before = state.values().clone();
+        let display = state.xbox_display_view().unwrap();
+        assert_eq!(display.source_id, source);
+        assert_eq!(display.buttons[0], (XboxDisplayButton::South, 1));
+        assert_eq!(state.values(), &before);
     }
 
     #[test]
