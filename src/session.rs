@@ -70,6 +70,19 @@ impl<P: CaptureProvider> CaptureSession<P> {
     /// snapshot. Per-device discovery, open, and read failures are events.
     pub fn poll(&mut self) -> Result<Vec<CaptureEvent>, CaptureError> {
         let snapshot = self.provider.enumerate()?;
+        let mut output = self.reconcile(snapshot);
+        output.extend(self.poll_active());
+        Ok(output)
+    }
+
+    /// Reconcile an externally obtained point-in-time discovery snapshot.
+    ///
+    /// This permits an embedding application to perform potentially slow host
+    /// discovery away from its active input-read loop. Opening a source still
+    /// occurs through this session's provider, and complete input frames remain
+    /// available only through [`Self::poll_active`].
+    #[must_use]
+    pub fn reconcile(&mut self, snapshot: DiscoverySnapshot) -> Vec<CaptureEvent> {
         let discovered_ids: BTreeSet<_> = snapshot
             .devices
             .iter()
@@ -122,8 +135,7 @@ impl<P: CaptureProvider> CaptureSession<P> {
             }
         }
 
-        output.extend(self.poll_active());
-        Ok(output)
+        output
     }
 
     /// Collect batches from already-open sources without rescanning host devices.
@@ -277,6 +289,31 @@ mod tests {
             [CaptureEvent::Connected { .. }]
         ));
         assert!(session.poll_active().is_empty());
+        assert_eq!(session.connected_devices().len(), 1);
+    }
+
+    #[test]
+    fn externally_obtained_snapshot_reconciles_without_consuming_provider_discovery() {
+        let pad = device();
+        let provider = FakeProvider {
+            scans: VecDeque::from([vec![pad.clone()]]),
+            fail_open: false,
+            access: CaptureAccess::Shared,
+        };
+        let mut session = CaptureSession::new(provider, AccessMode::Shared);
+
+        let reconciled = session.reconcile(DiscoverySnapshot {
+            devices: vec![pad],
+            issues: Vec::new(),
+        });
+        assert!(matches!(
+            reconciled.as_slice(),
+            [CaptureEvent::Connected { .. }]
+        ));
+
+        // The queued fake scan remains available to `poll`, demonstrating that
+        // reconciliation used only the supplied snapshot.
+        assert!(session.poll().unwrap().is_empty());
         assert_eq!(session.connected_devices().len(), 1);
     }
 
