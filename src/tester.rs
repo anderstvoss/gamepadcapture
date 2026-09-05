@@ -1,6 +1,9 @@
 //! Pure state model used by the optional gamepad tester window.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, VecDeque},
+    time::Duration,
+};
 
 use crate::hid::{HidDescriptor, HidFixture, HidReportFrame, HidReportLayout, frame_report};
 use crate::{
@@ -10,6 +13,122 @@ use crate::{
 
 const MAX_RETAINED_FRAMES: usize = 256;
 const MAX_RETAINED_LOG_ENTRIES: usize = 512;
+const MAX_TIMING_SAMPLES: usize = 256;
+
+/// A deterministic summary of recent diagnostic timing samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LatencySummary {
+    /// Number of samples currently represented, up to 256.
+    pub samples: usize,
+    /// Median latency in microseconds.
+    pub p50_micros: u128,
+    /// 95th-percentile latency in microseconds.
+    pub p95_micros: u128,
+    /// Largest retained latency in microseconds.
+    pub max_micros: u128,
+}
+
+/// Bounded timing evidence for the optional tester pipeline.
+///
+/// Timings diagnose this process only. In particular, `kernel_to_gui` uses the
+/// kernel event timestamp when it has the same clock basis as `SystemTime`; it
+/// is omitted rather than guessed for replay fixtures or incompatible clocks.
+#[derive(Debug, Default)]
+pub struct TesterTiming {
+    capture_core: RecentLatencies,
+    queue_to_gui: RecentLatencies,
+    state_apply: RecentLatencies,
+    kernel_to_gui: RecentLatencies,
+    gui_update: RecentLatencies,
+}
+
+#[derive(Debug, Default)]
+struct RecentLatencies {
+    samples: VecDeque<Duration>,
+}
+
+impl RecentLatencies {
+    fn observe(&mut self, duration: Duration) {
+        if self.samples.len() == MAX_TIMING_SAMPLES {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(duration);
+    }
+
+    fn summary(&self) -> Option<LatencySummary> {
+        let mut micros = self
+            .samples
+            .iter()
+            .map(Duration::as_micros)
+            .collect::<Vec<_>>();
+        if micros.is_empty() {
+            return None;
+        }
+        micros.sort_unstable();
+        let percentile = |numerator: usize, denominator: usize| {
+            let index = (micros.len() - 1) * numerator / denominator;
+            micros[index]
+        };
+        Some(LatencySummary {
+            samples: micros.len(),
+            p50_micros: percentile(50, 100),
+            p95_micros: percentile(95, 100),
+            max_micros: *micros.last().expect("checked non-empty timing samples"),
+        })
+    }
+}
+
+impl TesterTiming {
+    /// Record the duration spent in `CaptureSession::poll` or `poll_active`.
+    pub fn record_capture_core(&mut self, duration: Duration) {
+        self.capture_core.observe(duration);
+    }
+
+    /// Record the elapsed time from capture-worker enqueue to GUI receipt.
+    pub fn record_queue_to_gui(&mut self, duration: Duration) {
+        self.queue_to_gui.observe(duration);
+    }
+
+    /// Record state-model application time for one capture event.
+    pub fn record_state_apply(&mut self, duration: Duration) {
+        self.state_apply.observe(duration);
+    }
+
+    /// Record kernel-event-time to GUI-state latency when both clocks agree.
+    pub fn record_kernel_to_gui(&mut self, duration: Duration) {
+        self.kernel_to_gui.observe(duration);
+    }
+
+    /// Record one complete egui update, including view construction and paint submission.
+    pub fn record_gui_update(&mut self, duration: Duration) {
+        self.gui_update.observe(duration);
+    }
+
+    #[must_use]
+    pub fn capture_core(&self) -> Option<LatencySummary> {
+        self.capture_core.summary()
+    }
+
+    #[must_use]
+    pub fn queue_to_gui(&self) -> Option<LatencySummary> {
+        self.queue_to_gui.summary()
+    }
+
+    #[must_use]
+    pub fn state_apply(&self) -> Option<LatencySummary> {
+        self.state_apply.summary()
+    }
+
+    #[must_use]
+    pub fn kernel_to_gui(&self) -> Option<LatencySummary> {
+        self.kernel_to_gui.summary()
+    }
+
+    #[must_use]
+    pub fn gui_update(&self) -> Option<LatencySummary> {
+        self.gui_update.summary()
+    }
+}
 
 /// Pure HID fixture evidence rendered beside native evdev evidence.
 #[derive(Debug, Clone)]
@@ -96,6 +215,7 @@ pub struct TesterState {
     hid: Option<TesterHidEvidence>,
     log: Vec<String>,
     selected_source: Option<SourceId>,
+    timing: TesterTiming,
 }
 
 impl TesterState {
@@ -164,6 +284,17 @@ impl TesterState {
     #[must_use]
     pub fn log(&self) -> &[String] {
         &self.log
+    }
+
+    /// Display-only timing evidence for the native tester pipeline.
+    #[must_use]
+    pub fn timing(&self) -> &TesterTiming {
+        &self.timing
+    }
+
+    /// Mutable display-only timing evidence for the native tester pipeline.
+    pub fn timing_mut(&mut self) -> &mut TesterTiming {
+        &mut self.timing
     }
 
     fn push_frame(&mut self, frame: EventBatch) {
@@ -581,6 +712,36 @@ mod tests {
             .log()
             .last()
             .is_some_and(|entry| entry.ends_with(MAX_RETAINED_LOG_ENTRIES.to_string().as_str())));
+    }
+
+    #[test]
+    fn timing_summaries_are_bounded_and_percentile_ordered() {
+        let mut timing = TesterTiming::default();
+        assert_eq!(timing.capture_core(), None);
+        assert_eq!(timing.queue_to_gui(), None);
+        for micros in 0..=MAX_TIMING_SAMPLES {
+            timing.record_capture_core(Duration::from_micros(
+                u64::try_from(micros).expect("sample count fits u64"),
+            ));
+        }
+        let summary = timing.capture_core().expect("samples were recorded");
+        assert_eq!(summary.samples, MAX_TIMING_SAMPLES);
+        assert_eq!(summary.p50_micros, 128);
+        assert_eq!(summary.p95_micros, 243);
+        assert_eq!(summary.max_micros, 256);
+        assert!(summary.p50_micros <= summary.p95_micros);
+        assert!(summary.p95_micros <= summary.max_micros);
+
+        timing.record_queue_to_gui(Duration::from_micros(9));
+        assert_eq!(
+            timing.queue_to_gui(),
+            Some(LatencySummary {
+                samples: 1,
+                p50_micros: 9,
+                p95_micros: 9,
+                max_micros: 9,
+            })
+        );
     }
 
     #[test]

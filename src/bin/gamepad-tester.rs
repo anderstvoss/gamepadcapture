@@ -11,13 +11,13 @@ use std::{
         mpsc::{self, TrySendError},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use eframe::egui;
 use gamepad_capture::hid::HidFixture;
 use gamepad_capture::tester::{
-    NativeInputView, TesterSource, TesterState, XboxDisplayButton, XboxDisplayView,
+    LatencySummary, NativeInputView, TesterSource, TesterState, XboxDisplayButton, XboxDisplayView,
 };
 use gamepad_capture::{
     AbsoluteAxisInfo, AccessMode, CaptureAccess, CaptureEvent, CaptureSession, ControlDescriptor,
@@ -31,6 +31,14 @@ const MAX_EVENTS_PER_UPDATE: usize = 512;
 const MAX_PENDING_CAPTURE_EVENTS: usize = 512;
 const MAX_RENDERED_FRAMES: usize = 64;
 const MAX_RENDERED_LOG_ENTRIES: usize = 128;
+const MAX_KERNEL_TO_GUI_AGE: Duration = Duration::from_secs(2);
+
+struct TimedCaptureEvent {
+    event: CaptureEvent,
+    capture_core: Option<Duration>,
+    queued_at: Instant,
+    kernel_timestamp: Option<SystemTime>,
+}
 
 fn main() -> eframe::Result {
     eframe::run_native(
@@ -56,8 +64,9 @@ struct TesterApp {
     access: AccessChoice,
     surface: VisualizerSurface,
     state: TesterState,
-    receiver: Option<mpsc::Receiver<CaptureEvent>>,
+    receiver: Option<mpsc::Receiver<TimedCaptureEvent>>,
     stop: Option<Arc<AtomicBool>>,
+    last_timing_report: Option<Instant>,
 }
 
 #[derive(Default, PartialEq)]
@@ -78,10 +87,15 @@ enum AccessChoice {
 
 impl eframe::App for TesterApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        let update_started = Instant::now();
         let more_events_ready = self.drain_events();
-        Self::render_toolbar(ctx);
+        self.render_toolbar(ctx);
         self.render_sources(ctx);
         self.render_evidence(ctx);
+        self.state
+            .timing_mut()
+            .record_gui_update(update_started.elapsed());
+        self.report_timing();
         if more_events_ready {
             ctx.request_repaint();
         }
@@ -454,22 +468,64 @@ fn render_hid(ui: &mut egui::Ui, state: &TesterState) {
 }
 
 impl TesterApp {
+    fn report_timing(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_timing_report
+            .is_some_and(|previous| now.duration_since(previous) < Duration::from_secs(1))
+        {
+            return;
+        }
+        let timing = self.state.timing();
+        let Some(capture_core) = timing.capture_core() else {
+            return;
+        };
+        self.last_timing_report = Some(now);
+        eprintln!(
+            "gamepad-tester timing: capture-core={} queue-to-gui={} state-apply={} gui-update={} kernel-to-gui={}",
+            format_latency(capture_core),
+            format_optional_latency(timing.queue_to_gui()),
+            format_optional_latency(timing.state_apply()),
+            format_optional_latency(timing.gui_update()),
+            format_optional_latency(timing.kernel_to_gui()),
+        );
+    }
+
     fn drain_events(&mut self) -> bool {
         if let Some(receiver) = &self.receiver {
             for _ in 0..MAX_EVENTS_PER_UPDATE {
-                let Ok(event) = receiver.try_recv() else {
+                let Ok(timed) = receiver.try_recv() else {
                     return false;
                 };
-                self.state.apply(event);
+                let received_at = Instant::now();
+                if let Some(capture_core) = timed.capture_core {
+                    self.state.timing_mut().record_capture_core(capture_core);
+                }
+                self.state
+                    .timing_mut()
+                    .record_queue_to_gui(received_at.duration_since(timed.queued_at));
+                if let Some(kernel_timestamp) = timed.kernel_timestamp {
+                    if let Ok(age) = SystemTime::now().duration_since(kernel_timestamp) {
+                        if age <= MAX_KERNEL_TO_GUI_AGE {
+                            self.state.timing_mut().record_kernel_to_gui(age);
+                        }
+                    }
+                }
+                let state_started = Instant::now();
+                self.state.apply(timed.event);
+                self.state
+                    .timing_mut()
+                    .record_state_apply(state_started.elapsed());
             }
         }
         self.receiver.is_some()
     }
 
-    fn render_toolbar(ctx: &egui::Context) {
+    fn render_toolbar(&self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.heading("Gamepad Capture Tester");
             ui.label("Native evidence viewer — no normalization, routing, or output writes.");
+            render_timing(ui, &self.state);
         });
     }
 
@@ -595,24 +651,29 @@ impl TesterApp {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let mode = self.access_mode();
+        let discovery_receiver = spawn_discovery_worker(Arc::clone(&stop));
         thread::spawn(move || {
             let mut session =
                 CaptureSession::new(gamepad_capture::linux::EvdevProvider::new(), mode);
-            let mut next_discovery = Instant::now();
             let mut next_repaint = Instant::now();
             let mut dropped_display_events = 0_usize;
             while !thread_stop.load(Ordering::Relaxed) {
                 let now = Instant::now();
                 let mut sent_event = false;
                 if dropped_display_events > 0 {
-                    match sender.try_send(CaptureEvent::SourceError {
-                        source_id: SourceId::new("tester-display-queue"),
-                        error: gamepad_capture::CaptureError::new(
-                            gamepad_capture::CaptureErrorKind::Read,
-                            format!(
-                                "tester display queue omitted {dropped_display_events} complete event(s)"
+                    match sender.try_send(TimedCaptureEvent {
+                        event: CaptureEvent::SourceError {
+                            source_id: SourceId::new("tester-display-queue"),
+                            error: gamepad_capture::CaptureError::new(
+                                gamepad_capture::CaptureErrorKind::Read,
+                                format!(
+                                    "tester display queue omitted {dropped_display_events} complete event(s)"
+                                ),
                             ),
-                        ),
+                        },
+                        capture_core: None,
+                        queued_at: Instant::now(),
+                        kernel_timestamp: None,
                     }) {
                         Ok(()) => {
                             dropped_display_events = 0;
@@ -622,35 +683,50 @@ impl TesterApp {
                         Err(TrySendError::Disconnected(_)) => return,
                     }
                 }
-                let events = if now >= next_discovery {
-                    next_discovery = now + Duration::from_millis(500);
-                    session.poll()
-                } else {
-                    Ok(session.poll_active())
-                };
-                match events {
-                    Ok(events) => {
-                        for event in events {
-                            match sender.try_send(event) {
-                                Ok(()) => sent_event = true,
-                                Err(TrySendError::Full(_)) => {
-                                    dropped_display_events =
-                                        dropped_display_events.saturating_add(1);
-                                }
-                                Err(TrySendError::Disconnected(_)) => return,
-                            }
-                        }
-                        if sent_event && now >= next_repaint {
-                            repaint.request_repaint();
-                            next_repaint = now + UI_REPAINT_INTERVAL;
-                        }
+                let mut events = Vec::new();
+                while let Ok(snapshot) = discovery_receiver.try_recv() {
+                    match snapshot {
+                        Ok(snapshot) => events.extend(
+                            session
+                                .reconcile(snapshot)
+                                .into_iter()
+                                .map(|event| (event, None)),
+                        ),
+                        Err(error) => events.push((
+                            CaptureEvent::SourceError {
+                                source_id: SourceId::new("discovery"),
+                                error,
+                            },
+                            None,
+                        )),
                     }
-                    Err(error) => {
-                        let _ = sender.try_send(CaptureEvent::SourceError {
-                            source_id: SourceId::new("discovery"),
-                            error,
-                        });
+                }
+                let poll_started = Instant::now();
+                let active_events = session.poll_active();
+                let capture_core = poll_started.elapsed();
+                events.extend(
+                    active_events
+                        .into_iter()
+                        .map(|event| (event, Some(capture_core))),
+                );
+                for (event, event_capture_core) in events {
+                    let kernel_timestamp = latest_kernel_timestamp(&event);
+                    match sender.try_send(TimedCaptureEvent {
+                        event,
+                        capture_core: event_capture_core,
+                        queued_at: Instant::now(),
+                        kernel_timestamp,
+                    }) {
+                        Ok(()) => sent_event = true,
+                        Err(TrySendError::Full(_)) => {
+                            dropped_display_events = dropped_display_events.saturating_add(1);
+                        }
+                        Err(TrySendError::Disconnected(_)) => return,
                     }
+                }
+                if sent_event && now >= next_repaint {
+                    repaint.request_repaint();
+                    next_repaint = now + UI_REPAINT_INTERVAL;
                 }
                 thread::sleep(CAPTURE_POLL_INTERVAL);
             }
@@ -706,6 +782,84 @@ impl TesterApp {
             }),
         }
     }
+}
+
+fn spawn_discovery_worker(
+    stop: Arc<AtomicBool>,
+) -> mpsc::Receiver<Result<gamepad_capture::DiscoverySnapshot, gamepad_capture::CaptureError>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut provider = gamepad_capture::linux::EvdevProvider::new();
+        while !stop.load(Ordering::Relaxed) {
+            let snapshot = gamepad_capture::CaptureProvider::enumerate(&mut provider);
+            match sender.try_send(snapshot) {
+                Ok(()) | Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => return,
+            }
+            for _ in 0..10 {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    });
+    receiver
+}
+
+fn latest_kernel_timestamp(event: &CaptureEvent) -> Option<SystemTime> {
+    match event {
+        CaptureEvent::Input(batch) => batch.events.iter().map(|native| native.timestamp).max(),
+        _ => None,
+    }
+}
+
+fn render_timing(ui: &mut egui::Ui, state: &TesterState) {
+    let timing = state.timing();
+    let summary = |name: &str, value: Option<LatencySummary>| {
+        value.map_or_else(
+            || format!("{name}: waiting"),
+            |value| {
+                format!(
+                    "{name}: p50 {} ms / p95 {} ms / max {} ms (n={})",
+                    micros_to_millis(value.p50_micros),
+                    micros_to_millis(value.p95_micros),
+                    micros_to_millis(value.max_micros),
+                    value.samples
+                )
+            },
+        )
+    };
+    ui.collapsing("Pipeline timing (latest 256 samples)", |ui| {
+        ui.monospace(summary("Capture core", timing.capture_core()));
+        ui.monospace(summary("Worker queue → GUI", timing.queue_to_gui()));
+        ui.monospace(summary("GUI state application", timing.state_apply()));
+        ui.monospace(summary("Complete egui update", timing.gui_update()));
+        ui.monospace(summary("Kernel timestamp → GUI state", timing.kernel_to_gui()));
+        ui.weak(
+            "The last line is best-effort end-to-end-to-state timing; it is omitted when the kernel timestamp clock cannot be compared safely. Presentation scan-out is not observable from this API.",
+        );
+    });
+}
+
+fn micros_to_millis(micros: u128) -> String {
+    let millis = micros / 1_000;
+    let fractional = (micros % 1_000) / 10;
+    format!("{millis}.{fractional:02}")
+}
+
+fn format_latency(summary: LatencySummary) -> String {
+    format!(
+        "p50={}ms,p95={}ms,max={}ms,n={}",
+        micros_to_millis(summary.p50_micros),
+        micros_to_millis(summary.p95_micros),
+        micros_to_millis(summary.max_micros),
+        summary.samples
+    )
+}
+
+fn format_optional_latency(summary: Option<LatencySummary>) -> String {
+    summary.map_or_else(|| "unavailable".to_owned(), format_latency)
 }
 
 fn synthetic_device() -> DeviceDescriptor {
